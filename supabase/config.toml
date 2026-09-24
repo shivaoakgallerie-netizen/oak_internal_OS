@@ -1,0 +1,10 @@
+project_id = "oak-service-v1"
+
+[functions.notification-worker]
+verify_jwt = true
+
+[functions.notification-scan]
+verify_jwt = true
+
+[functions.resend-webhook]
+verify_jwt = false

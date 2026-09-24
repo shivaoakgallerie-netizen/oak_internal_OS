@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#201d19"><meta name="description" content="Oak Gallerie role-based internal workflow prototype">
+<title>Oak Gallerie · Team workspace</title>
+<link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="icons/oak-mark.svg" type="image/svg+xml">
+<link rel="stylesheet" href="styles.css"><link rel="stylesheet" href="prototype.css"><script src="app.js" type="module"></script>
+</head>
+<body>
+<div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+<section id="login" class="login"><div class="loginbox demo-login">
+<div class="brand">Oak Gallerie<small>Internal workflow</small></div>
+<div class="login-intro"><span class="eyebrow">The team, together</span><h1>Every detail. Taken care of.</h1><p>Choose a demo account to explore the workday from their perspective.</p></div>
+<div class="demo-note">Sign in with your phone number and password.</div>
+<div id="loginError" class="notice error hidden" role="alert"></div>
+<form id="loginForm" class="stack">
+  <div style="margin-bottom: 14px;"><label for="loginPhone">Phone Number</label><input id="loginPhone" class="control" type="tel" required placeholder="e.g. 8336867314" autocomplete="tel"></div>
+  <div style="margin-bottom: 18px;"><label for="loginPassword">Password</label><input id="loginPassword" class="control" type="password" required placeholder="••••••••" autocomplete="current-password"></div>
+  <button type="submit" class="btn primary fullbtn" id="loginBtn">Sign in</button>
+</form>
+<p class="hint" style="margin-top: 14px; text-align: center;">Admin: 8336867314 · Manager: 8551069729</p>
+</div></section>
+<div id="workspace" class="app hidden">
+<header class="topbar"><div class="topin"><div class="brand">Oak Gallerie<small>Internal workflow</small></div><div class="spacer"></div><button id="installBtn" class="btn compact hidden">Install app</button><div class="user-identity"><strong id="userName"></strong><small id="userRole"></small></div><button class="btn compact" id="logout">Switch account</button></div></header>
+<main class="shell">
+<div class="prototype-banner"><span>Working prototype · Simulated alerts · <span id="demoTime"></span> IST</span><span id="storageStatus" class="small">Saved in this browser</span></div>
+<nav class="workspace-nav" aria-label="Workspace"><button class="nav-link active" data-view="requests">Requests</button><button class="nav-link" data-view="inbox">My reminders <span id="inboxCount"></span></button><button class="nav-link hidden" data-view="staff">Staff directory</button><button class="nav-link hidden" data-view="reports">Reports</button><button class="nav-link hidden" data-view="deliveries">Delivery health</button></nav>
+<div class="heading"><div><span class="eyebrow" id="workspaceEyebrow">Daily workspace</span><h1 id="pageTitle">Team requests</h1><p id="pageDescription"></p></div><button class="btn primary" id="newTicketBtn">+ New request</button></div>
+<section id="requestsView"><div class="grid">
+<section class="card queue" aria-label="Request queue">
+<div class="filters"><input id="search" class="field search" aria-label="Search requests" placeholder="Search person, project or note"><select id="scopeFilter" class="field" aria-label="Queue scope"><option value="relevant">My workspace</option><option value="assigned">Assigned to me</option><option value="created">Created by me</option><option value="shared">Shared queue</option></select><select id="typeFilter" class="field" aria-label="Request type"><option value="">All types</option><option value="service">Service</option><option value="help_ticket">Help ticket</option><option value="follow_up">Follow-up</option><option value="urgent_message">Urgent message</option></select><select id="statusFilter" class="field" aria-label="Status"><option value="">All open</option><option>New</option><option>In Review</option><option>Scheduled</option><option>Resolved</option><option value="all">All statuses</option></select><select id="projectFilter" class="field" aria-label="Project"><option value="">All projects</option></select></div>
+<div id="ticketList"></div></section>
+<aside class="side"><div class="card metriccard"><h2>Work that needs attention</h2><div class="duebox"><div><span>Unacknowledged urgent</span><strong id="urgentCount">0</strong></div><span class="badge urgent">Critical</span></div><div class="duebox"><div><span>24-hour update due</span><strong id="dueCount">0</strong></div><span class="badge due">Update due</span></div><div class="duebox"><div><span>Open requests</span><strong id="openCount">0</strong></div><span class="badge">In your workspace</span></div></div>
+<div class="card metriccard"><h2>Your role</h2><p class="small" id="roleGuidance"></p><p class="hint">The assigned person receives a 24-hour reminder. If unassigned, the creator receives it. Only a recorded workflow update resets the clock.</p></div>
+<div id="demoControls" class="card metriccard demo-controls hidden"><h2>Try the reminder clock</h2><p class="hint">Move time forward for every demo account. Switch accounts to see who received a reminder.</p><div class="clock-controls"><button class="btn compact" data-advance="0.25">+15 minutes</button><button class="btn compact" data-advance="12">+12 hours</button><button class="btn compact" data-advance="24">+24 hours</button></div><button id="resetDemo" class="btn compact fullbtn">Reset sample workspace</button></div>
+</aside></div></section>
+<section id="inboxView" class="hidden"><p class="notice">These are simulated messages addressed to you. No SMS, push or email is sent.</p><div id="inboxList" class="notification-list"></div></section>
+<section id="staffView" class="hidden"><div id="staffList" class="staff-grid"></div></section>
+<section id="reportsView" class="hidden"><div id="reportSummary" class="report-grid"></div><div class="report-grid"><article class="card report-card"><h2>Open work by type</h2><div id="typeReport"></div></article><article class="card report-card"><h2>Workload by person</h2><div id="workloadReport"></div></article></div><article class="card report-card"><h2>Resolved requests</h2><div id="resolvedReport" class="table-wrap"></div></article></section>
+<section id="deliveriesView" class="hidden"><p class="notice">Push and email outcomes below are simulated for testing. “Accepted” means provider acceptance; only the recipient's acknowledgement confirms urgent receipt.</p><div id="deliverySummary" class="report-grid"></div><div id="deliveryList"></div></section>
+</main></div>
+<dialog id="newTicketDialog" aria-labelledby="newTitle"><form class="modal" id="newTicketForm"><div class="modalhead"><div><span class="eyebrow">New request</span><h2 id="newTitle">What needs attention?</h2></div><button type="button" class="x" data-close="newTicketDialog" aria-label="Close new request">×</button></div><div class="formgrid">
+<div><label for="ticketType">Request type</label><select id="ticketType" class="control"></select></div>
+<div id="clientField"><label for="clientSelect">Client</label><select id="clientSelect" class="control"></select></div><div id="projectField"><label for="projectSelect">Project</label><select id="projectSelect" class="control"></select></div>
+<div id="assigneeField"><label for="assigneeSelect">Assign to</label><select id="assigneeSelect" class="control"></select></div><p id="routingHint" class="hint full"></p>
+<div id="reminderField" class="hidden"><label for="reminderPreset">Remind me</label><select id="reminderPreset" class="control"><option value="12">In 12 hours</option><option value="24">In 24 hours</option><option value="custom">Specific date and time</option></select></div><div id="customReminderField" class="hidden"><label for="customReminder">Date and time (India)</label><input id="customReminder" class="control" type="datetime-local"></div>
+<div class="full"><label for="ticketNote">Description</label><textarea id="ticketNote" class="control" rows="4" maxlength="2000" required placeholder="Write one clear, actionable note."></textarea></div>
+<div class="full"><label for="ticketFiles">Photos or videos</label><input id="ticketFiles" class="control" type="file" multiple accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm"><div id="filePreview" class="filepreview"></div><p class="hint">Images up to 10 MB; videos up to 50 MB each. Demo files stay on this browser.</p></div>
+</div><div id="uploadProgress" class="progress hidden" aria-label="Saving attachments"><span></span></div><div class="footer"><button type="button" class="btn" data-close="newTicketDialog">Cancel</button><button type="submit" class="btn primary" id="submitTicket">Create request</button></div></form></dialog>
+<dialog id="ticketDialog" aria-labelledby="detailTitle"><div class="modal"><div class="modalhead"><div><span class="eyebrow" id="detailProject"></span><h2 id="detailTitle">Request</h2></div><button type="button" class="x" data-close="ticketDialog" aria-label="Close request">×</button></div><div id="detailBadges" class="meta"></div><p id="detailSummary" class="detail-summary hint"></p><div id="detailMedia" class="media"></div><div id="ackWrap" class="ackbox hidden"><strong>This urgent message needs your acknowledgement.</strong><button class="btn urgentbtn" id="acknowledgeBtn">Acknowledge</button></div><p id="accessNote" class="access-note"></p>
+<div id="assignmentControls" class="formgrid updateform hidden"><div class="full"><label for="detailAssignee">Assigned person</label><select id="detailAssignee" class="control"></select></div><button class="btn" id="saveAssignee">Update assignment</button></div>
+<form id="updateForm" class="hidden"><div class="formgrid updateform"><div><label for="detailStatus">Status</label><select id="detailStatus" class="control"></select></div><div><label for="expectedTimeline">Expected timeline</label><input id="expectedTimeline" class="control" maxlength="500" placeholder="e.g. Site visit tomorrow, 3–5 PM"></div><div class="full"><label for="internalNote">Workflow update</label><textarea id="internalNote" class="control" rows="3" maxlength="2000" placeholder="What changed since the last update?"></textarea></div></div><div class="footer"><button class="btn primary" id="saveUpdate" type="submit">Record update</button></div></form>
+<form id="attachmentForm" class="updateform hidden"><label for="detailFiles">Add photos or videos</label><input id="detailFiles" class="control" type="file" multiple accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm"><p class="hint">Adding media does not reset the 24-hour clock. Images: 10 MB; videos: 50 MB each.</p><button class="btn" type="submit" id="saveAttachments">Save attachments</button></form>
+<h3 class="sectiontitle">Delivery state</h3><div id="detailDelivery" class="small"></div><h3 class="sectiontitle">Documented trail</h3><div id="detailTimeline" class="timeline"></div></div></dialog>
+<dialog id="resetDialog" aria-labelledby="resetTitle"><form class="modal" id="resetForm"><h2 id="resetTitle">Reset the sample workspace?</h2><p>This removes demo requests, updates and uploaded files from this browser, restores the six sample accounts, and resets the demo clock.</p><div class="footer"><button type="button" class="btn" data-close="resetDialog">Keep my changes</button><button class="btn primary" type="submit">Reset demo data</button></div></form></dialog>
+</body>
+</html>

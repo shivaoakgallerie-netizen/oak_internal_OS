@@ -1,0 +1,13 @@
+{
+  "name": "Oak Gallerie Internal Workflow",
+  "short_name": "Oak Workflow",
+  "description": "Staff requests, reminders and urgent messages",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f7f5f0",
+  "theme_color": "#171715",
+  "icons": [
+    {"src":"icons/oak-mark.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}
+  ]
+}

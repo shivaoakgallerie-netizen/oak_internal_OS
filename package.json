@@ -1,0 +1,15 @@
+{
+  "name": "oak-gallerie-internal-workflow",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "validate": "node scripts/validate.mjs",
+    "test": "node --test tests/demo-model.test.mjs",
+    "import:staff": "node scripts/import-staff.mjs"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.57.4"
+  }
+}
