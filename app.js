@@ -8,7 +8,7 @@ const initials = name => name.split(' ').map(part => part[0]).join('').slice(0, 
 const EVENT_LABEL = { created: 'Request created', assigned: 'Assignment changed', status_updated: 'Workflow updated', resolved: 'Resolved', reopened: 'Reopened', reminder_due: 'Personal reminder due', reminder_cancelled: 'Personal reminder cancelled', overdue: '24-hour update overdue', urgent_repeat: 'Urgent reminder repeated', notification_queued: 'Notification queued', notification_sent: 'Simulated delivery', notification_failed: 'Simulated delivery failed', notification_cancelled: 'Notification cancelled', notification_retried: 'Delivery retried', read: 'Request opened', acknowledged: 'Urgent message acknowledged', attachment_added: 'Attachment added' };
 const KIND_LABEL = { assigned: 'New assigned work', urgent: 'Urgent message', urgent_repeat: 'Urgent acknowledgement reminder', overdue: '24-hour update reminder', follow_up: 'Personal follow-up reminder' };
 const SESSION_KEY = 'oak-demo-account-v3';
-let engine, currentUser = null, currentTicketId = null, currentView = 'requests', busy = false, memoryOnly = false, deferredInstall = null;
+let engine, currentUser = null, currentTicketId = null, currentView = 'requests', busy = false, memoryOnly = false;
 let mediaURLs = [], previewURLs = [], mediaVersion = 0;
 const memoryMedia = new Map();
 const state = () => engine.state;
@@ -272,23 +272,21 @@ function bind() {
     const staff = event.target.closest('[data-staff]'); if (staff) run(staff, async () => { const member = userById(staff.dataset.staff); await change(draft => draft.setStaffActive(currentUser, member.id, !member.is_active)); toast('Demo staff access updated.'); });
   });
   window.addEventListener('hashchange', () => handleDeepLink().catch(reportError));
-  window.addEventListener('beforeinstallprompt', event => { event.preventDefault(); deferredInstall = event; show('installBtn', true) });
-  $('installBtn').onclick = async () => { if (!deferredInstall) { toast('On iPhone: Share → Add to Home Screen.'); return } await deferredInstall.prompt(); await deferredInstall.userChoice; deferredInstall = null; show('installBtn', false) };
 }
 async function start() {
   bind(); let saved = null;
   try {
     saved = await loadDemo();
     const seed = seedDemo();
-    if (saved) {
-      // Sync phone and password credentials to previously saved team records
+    if (saved && saved.team && saved.team.length === seed.team.length && saved.team[0]?.phone === seed.team[0]?.phone) {
       let updated = false;
       for (const seededUser of seed.team) {
         const existing = saved.team?.find(u => u.id === seededUser.id);
         if (existing) {
-          if (existing.phone !== seededUser.phone || existing.password !== seededUser.password) {
+          if (existing.phone !== seededUser.phone || existing.password !== seededUser.password || existing.name !== seededUser.name) {
             existing.phone = seededUser.phone;
             existing.password = seededUser.password;
+            existing.name = seededUser.name;
             updated = true;
           }
         }
@@ -297,12 +295,11 @@ async function start() {
       if (updated) await saveDemo(state());
     } else {
       engine = new DemoEngine(seed);
-      await saveDemo(state());
+      await saveDemo(seed);
     }
   }
   catch (error) { memoryOnly = true; engine = new DemoEngine(seedDemo()); $('loginError').textContent = error.message + ' This session is temporary; refreshing will discard changes.'; show('loginError', true) }
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('service-worker.js').catch(() => { });
-  if (/iphone|ipad|ipod/i.test(navigator.userAgent) && !window.matchMedia('(display-mode: standalone)').matches) show('installBtn', true);
   const id = savedSession(); if (id && userById(id)?.is_active) await login(id);
   setInterval(() => { if (currentUser && !busy && !document.querySelector('dialog[open]')) change(draft => draft.scan()).catch(reportError) }, 60000);
 }

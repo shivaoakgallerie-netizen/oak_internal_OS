@@ -196,31 +196,28 @@ export class DemoEngine {
 
 export function seedDemo(at=Date.now()){
   const names=[
-    ['Admin / Owner','admin','Leadership','8336867314','Admin@123'],
-    ['Manager / Team Lead','manager','Operations','8551069729','Shiv@123'],
-    ['Staff Member','staff','Showroom','9900001003','Staff@123'],
-    ['Service Technician 1','technician','Service & Installation','9900001004','Tech@123'],
-    ['Service Technician 2','technician','Service & Finishing','9900001005','Tech@123'],
-    ['Support / Back-office','support','Accounts & Back-office','9900001006','Support@123']
+    ['Aditya Nahata','admin','Management','9831898326','Admin123'],
+    ['Shibani','staff','Showroom & Sales','8100302122','Staff123'],
+    ['Rohit','staff','Operations & Service','8100302022','Staff123']
   ];
-  const state={version:3,clockOffsetMs:0,team:names.map(([name,role,department,phone,password],index)=>({id:`u${index+1}`,auth_user_id:`demo-auth-${index+1}`,name,role,department,phone,password,email:`user${index+1}@example.com`,is_active:true,demo_push_available:index!==5})),clients:[{id:'c1',name:'Alipore Residence'},{id:'c2',name:'Ballygunge Residence'},{id:'c3',name:'The Meridian Suite'}],projects:[{id:'p1',client_id:'c1',name:'Alipore Residence',site_address:'Alipore, Kolkata'},{id:'p2',client_id:'c2',name:'Ballygunge Residence',site_address:'Ballygunge, Kolkata'},{id:'p3',client_id:'c3',name:'The Meridian Suite',site_address:'Park Street, Kolkata'}],tickets:[],events:[],attachments:[],notifications:[],deliveries:[],workerRuns:[]};
+  const state={version:3,clockOffsetMs:0,team:names.map(([name,role,department,phone,password],index)=>({id:`u${index+1}`,auth_user_id:`demo-auth-${index+1}`,name,role,department,phone,password,email:`user${index+1}@example.com`,is_active:true,demo_push_available:index!==2})),clients:[{id:'c1',name:'Alipore Residence'},{id:'c2',name:'Ballygunge Residence'},{id:'c3',name:'The Meridian Suite'}],projects:[{id:'p1',client_id:'c1',name:'Alipore Residence',site_address:'Alipore, Kolkata'},{id:'p2',client_id:'c2',name:'Ballygunge Residence',site_address:'Ballygunge, Kolkata'},{id:'p3',client_id:'c3',name:'The Meridian Suite',site_address:'Park Street, Kolkata'}],tickets:[],events:[],attachments:[],notifications:[],deliveries:[],workerRuns:[]};
   const fixtures=[
-    ['service','Tighten the loose arm on the walnut dining chair.','p1','u4','u3',30,'New'],
-    ['service','Inspect the marble console edge before final installation.','p3','u5','u2',8,'In Review'],
+    ['service','Tighten the loose arm on the walnut dining chair.','p1','u2','u3',30,'New'],
+    ['service','Inspect the marble console edge before final installation.','p3','u3','u2',8,'In Review'],
     ['service','Arrange a velvet sofa upholstery inspection.','p2',null,'u3',26,'New'],
-    ['help_ticket','Prepare the final invoice for the Alipore dining collection.','p1','u6','u3',28,'In Review'],
+    ['help_ticket','Prepare the final invoice for the Alipore dining collection.','p1','u2','u3',28,'In Review'],
     ['help_ticket','Confirm two ivory bouclé swatches are in showroom stock.',null,'u3','u2',5,'New'],
     ['help_ticket','Share the approved console dimensions with the factory.','p3',null,'u2',10,'New'],
     ['follow_up','Call the client to confirm their fabric selection.','p2','u3','u3',13,'New'],
-    ['follow_up','Confirm tomorrow’s polish touch-up visit.','p1','u4','u4',3,'Scheduled'],
-    ['follow_up','Check whether the final payment receipt has arrived.','p1','u6','u6',6,'In Review'],
-    ['urgent_message','Hold the dining-table dispatch: the client changed the delivery entrance.','p3','u5','u2',0.1,'New'],
-    ['urgent_message','Please meet the client at the showroom entrance now.',null,'u3','u1',0.12,'New'],
-    ['urgent_message','Confirm the installation team has reached the VIP residence.','p1','u4','u2',1,'In Review'],
-    ['service','Complete the brass handle alignment on the credenza.','p2','u5','u3',72,'Resolved'],
+    ['follow_up','Confirm tomorrow’s polish touch-up visit.','p1','u2','u2',3,'Scheduled'],
+    ['follow_up','Check whether the final payment receipt has arrived.','p1','u3','u3',6,'In Review'],
+    ['urgent_message','Hold the dining-table dispatch: the client changed the delivery entrance.','p3','u3','u2',0.1,'New'],
+    ['urgent_message','Please meet the client at the showroom entrance now.',null,'u2','u1',0.12,'New'],
+    ['urgent_message','Confirm the installation team has reached the VIP residence.','p1','u3','u2',1,'In Review'],
+    ['service','Complete the brass handle alignment on the credenza.','p2','u2','u3',72,'Resolved'],
     ['follow_up','Review this week’s open installation commitments.',null,'u1','u1',25,'New'],
     ['follow_up','Check the Meridian delivery access approval.','p3','u2','u2',12,'New'],
-    ['follow_up','Pack the approved polish kit for the Ballygunge visit.','p2','u5','u5',4,'New']
+    ['follow_up','Pack the approved polish kit for the Ballygunge visit.','p2','u3','u3',4,'New']
   ];
   fixtures.forEach(([type,note,project_id,assignee_id,creator,age,status],index)=>{
     const created=at-age*HOUR,last=status==='New'?created:created+Math.min(age/4,2)*HOUR;
@@ -232,9 +229,9 @@ export function seedDemo(at=Date.now()){
     }
   });
   const engine=new DemoEngine(state,()=>at);
-  const acknowledged=state.tickets.find(ticket=>ticket.id==='t12');acknowledged.urgent_read_at=iso(at-45*60000);acknowledged.urgent_acknowledged_at=iso(at-43*60000);acknowledged.urgent_acknowledged_by='u4';
-  engine._event(acknowledged,'read',state.team[3],{metadata:{receipt_cycle:1}},at-45*60000);engine._event(acknowledged,'acknowledged',state.team[3],{},at-43*60000);
-  const readUrgent=state.tickets.find(ticket=>ticket.id==='t11');readUrgent.urgent_read_at=iso(at-3*60000);engine._event(readUrgent,'read',state.team[2],{metadata:{receipt_cycle:1}},at-3*60000);
+  const acknowledged=state.tickets.find(ticket=>ticket.id==='t12');acknowledged.urgent_read_at=iso(at-45*60000);acknowledged.urgent_acknowledged_at=iso(at-43*60000);acknowledged.urgent_acknowledged_by='u3';
+  engine._event(acknowledged,'read',state.team[2],{metadata:{receipt_cycle:1}},at-45*60000);engine._event(acknowledged,'acknowledged',state.team[2],{},at-43*60000);
+  const readUrgent=state.tickets.find(ticket=>ticket.id==='t11');readUrgent.urgent_read_at=iso(at-3*60000);engine._event(readUrgent,'read',state.team[1],{metadata:{receipt_cycle:1}},at-3*60000);
   state.tickets.find(ticket=>ticket.id==='t10').demo_delivery_mode='failure';state.tickets.find(ticket=>ticket.id==='t5').demo_delivery_mode='retry';
   for(const ticket of state.tickets.filter(ticket=>ticket.assignee_id&&ticket.type!=='follow_up'&&ticket.status!=='Resolved')){
     const notification=engine._notify(ticket,state.events.find(event=>event.ticket_id===ticket.id&&event.event_type==='created'),ticket.type==='urgent_message'?'urgent':'assigned',ticket.assignee_id);

@@ -5,6 +5,15 @@
   --focus-ring: #8a5b2d;
 }
 
+/* Brand Logo & Emblem Styles */
+.login-brand-wrap { text-align: center; margin-bottom: 20px; }
+.login-brand-logo { max-width: 220px; max-height: 180px; width: auto; height: auto; object-fit: contain; margin: 0 auto; display: block; }
+.brand { display: flex; align-items: center; gap: 10px; }
+.brand-mark { height: 38px; width: auto; object-fit: contain; flex-shrink: 0; }
+.brand-text { display: flex; flex-direction: column; }
+.brand-text span { font-family: var(--serif); font-size: 19px; font-weight: 700; letter-spacing: .02em; line-height: 1.1; color: var(--ink); }
+.brand-text small { font-family: var(--sans); font-size: 8px; font-weight: 700; letter-spacing: .15em; text-transform: uppercase; color: var(--accent-deep); margin-top: 2px; }
+
 html { scroll-padding-top: 100px; }
 body { line-height: 1.5; }
 button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }

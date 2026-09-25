@@ -10,19 +10,19 @@
 <body>
 <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 <section id="login" class="login"><div class="loginbox demo-login">
-<div class="brand">Oak Gallerie<small>Internal workflow</small></div>
-<div class="login-intro"><span class="eyebrow">The team, together</span><h1>Every detail. Taken care of.</h1><p>Choose a demo account to explore the workday from their perspective.</p></div>
-<div class="demo-note">Sign in with your phone number and password.</div>
+<div class="login-brand-wrap">
+  <img src="icons/logo.png" alt="Oak Gallerie" class="login-brand-logo">
+</div>
+<div class="login-intro"><span class="eyebrow">Internal Team Workspace</span><h1>Every detail. Taken care of.</h1><p>Sign in to access your workflow and team requests.</p></div>
 <div id="loginError" class="notice error hidden" role="alert"></div>
 <form id="loginForm" class="stack">
-  <div style="margin-bottom: 14px;"><label for="loginPhone">Phone Number</label><input id="loginPhone" class="control" type="tel" required placeholder="e.g. 8336867314" autocomplete="tel"></div>
+  <div style="margin-bottom: 14px;"><label for="loginPhone">Phone Number</label><input id="loginPhone" class="control" type="tel" required placeholder="Enter phone number" autocomplete="tel"></div>
   <div style="margin-bottom: 18px;"><label for="loginPassword">Password</label><input id="loginPassword" class="control" type="password" required placeholder="••••••••" autocomplete="current-password"></div>
   <button type="submit" class="btn primary fullbtn" id="loginBtn">Sign in</button>
 </form>
-<p class="hint" style="margin-top: 14px; text-align: center;">Admin: 8336867314 · Manager: 8551069729</p>
 </div></section>
 <div id="workspace" class="app hidden">
-<header class="topbar"><div class="topin"><div class="brand">Oak Gallerie<small>Internal workflow</small></div><div class="spacer"></div><button id="installBtn" class="btn compact hidden">Install app</button><div class="user-identity"><strong id="userName"></strong><small id="userRole"></small></div><button class="btn compact" id="logout">Switch account</button></div></header>
+<header class="topbar"><div class="topin"><div class="brand"><img src="icons/symbol.png" alt="Oak Gallerie" class="brand-mark"><div class="brand-text"><span>Oak Gallerie</span><small>By Aditya Nahata</small></div></div><div class="spacer"></div><div class="user-identity"><strong id="userName"></strong><small id="userRole"></small></div><button class="btn compact" id="logout">Switch account</button></div></header>
 <main class="shell">
 <div class="prototype-banner"><span>Working prototype · Simulated alerts · <span id="demoTime"></span> IST</span><span id="storageStatus" class="small">Saved in this browser</span></div>
 <nav class="workspace-nav" aria-label="Workspace"><button class="nav-link active" data-view="requests">Requests</button><button class="nav-link" data-view="inbox">My reminders <span id="inboxCount"></span></button><button class="nav-link hidden" data-view="staff">Staff directory</button><button class="nav-link hidden" data-view="reports">Reports</button><button class="nav-link hidden" data-view="deliveries">Delivery health</button></nav>
