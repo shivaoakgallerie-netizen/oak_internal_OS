@@ -196,9 +196,9 @@ export class DemoEngine {
 
 export function seedDemo(at=Date.now()){
   const names=[
-    ['Aditya Nahata','admin','Management','9831898326','Admin123'],
-    ['Shibani','staff','Showroom & Sales','8100302122','Staff123'],
-    ['Rohit','staff','Operations & Service','8100302022','Staff123']
+    ['Aditya Nahata','admin','Management','9831898326','1234567'],
+    ['Shibani','staff','Showroom & Sales','8100302122','1234567'],
+    ['Rohit','staff','Operations & Service','8100302022','1234567']
   ];
   const state={version:3,clockOffsetMs:0,team:names.map(([name,role,department,phone,password],index)=>({id:`u${index+1}`,auth_user_id:`demo-auth-${index+1}`,name,role,department,phone,password,email:`user${index+1}@example.com`,is_active:true,demo_push_available:index!==2})),clients:[{id:'c1',name:'Alipore Residence'},{id:'c2',name:'Ballygunge Residence'},{id:'c3',name:'The Meridian Suite'}],projects:[{id:'p1',client_id:'c1',name:'Alipore Residence',site_address:'Alipore, Kolkata'},{id:'p2',client_id:'c2',name:'Ballygunge Residence',site_address:'Ballygunge, Kolkata'},{id:'p3',client_id:'c3',name:'The Meridian Suite',site_address:'Park Street, Kolkata'}],tickets:[],events:[],attachments:[],notifications:[],deliveries:[],workerRuns:[]};
   const fixtures=[
