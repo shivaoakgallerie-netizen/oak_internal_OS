@@ -1,7 +1,9 @@
-node_modules/
-dist/
 .env
-.env.local
-.DS_Store
-Thumbs.db
-.vscode/
+.env.*
+!.env.example
+node_modules/
+.npm-cache/
+dist/
+staff-roster.csv
+*.secret
+backups/

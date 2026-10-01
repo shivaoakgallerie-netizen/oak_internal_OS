@@ -1,7 +1,7 @@
-const CACHE = 'oak-shell-role-prototype-v2';
+const CACHE = 'oak-shell-secure-v6';
 const SHELL = [
   './', './index.html', './styles.css', './prototype.css', './app.js',
-  './demo-model.js', './demo-storage.js', './manifest.webmanifest', './icons/oak-mark.svg'
+  './workflow-rules.js', './live-client.js', './legacy-cleanup.js', './config.js', './vendor/supabase.js', './icons/logo.png', './icons/symbol.png', './manifest.webmanifest', './icons/oak-mark.svg'
 ];
 const shellUrls = new Set(SHELL.map(path => new URL(path, self.registration.scope).href));
 const indexUrl = new URL('./index.html', self.registration.scope).href;
@@ -29,7 +29,7 @@ async function networkFirst(request, navigation) {
   } catch {
     const cache = await caches.open(CACHE);
     const cached = await cache.match(navigation ? indexUrl : request.url);
-    return cached || new Response('Oak Gallerie is unavailable offline. Connect once to load the prototype.', {
+    return cached || new Response('Oak Gallerie is unavailable offline. Connect once to load the application.', {
       status: 503, headers: { 'Content-Type': 'text/plain; charset=utf-8' }
     });
   }
@@ -43,4 +43,18 @@ self.addEventListener('fetch', event => {
   const navigation = request.mode === 'navigate' && request.url.startsWith(self.registration.scope);
   if (!navigation && !shellUrls.has(request.url)) return;
   event.respondWith(networkFirst(request, navigation));
+});
+self.addEventListener('push',event=>{
+ let data;try{data=event.data?.json()||{};}catch{data={};}
+ // The lock-screen message contains no confidential request notes.
+ event.waitUntil(self.registration.showNotification('Oak Gallerie',{body:'You have a workflow notification. Sign in to view it.',icon:'icons/oak-mark.svg',tag:typeof data.tag==='string'?data.tag:'oak-work',data:{url:data.url}}));
+});
+self.addEventListener('notificationclick',event=>{
+ event.notification.close();
+ const url=new URL(event.notification.data?.url||'./',self.registration.scope);
+ if(url.origin!==self.location.origin||!url.href.startsWith(self.registration.scope))return;
+ event.waitUntil(self.clients.matchAll({type:'window',includeUncontrolled:true}).then(async clients=>{
+  for(const client of clients)if(client.url.startsWith(self.registration.scope)){await client.navigate(url.href);return client.focus();}
+  return self.clients.openWindow(url.href);
+ }));
 });

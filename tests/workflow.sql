@@ -8,12 +8,13 @@ insert into public.team_users(id,auth_user_id,name,phone,email) values
  ('10000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000001','Test Creator','+919800000001','creator@example.test'),
  ('10000000-0000-0000-0000-000000000002','20000000-0000-0000-0000-000000000002','Test Recipient','+919800000002','recipient@example.test');
 insert into public.clients(id,name,phone) values('30000000-0000-0000-0000-000000000001','Test Client','+919800000003');
+update public.team_users set role='admin' where id='10000000-0000-0000-0000-000000000001';
 insert into public.projects(id,client_id,name) values('40000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000001','Test Project');
 select set_config('request.jwt.claims','{"sub":"20000000-0000-0000-0000-000000000001","role":"authenticated"}',true);
 
 select extensions.throws_ok(
  $$select public.create_request('service','Missing project')$$,
- 'Service requests require a project',
+ 'Service requires a project',
  'service requires a project'
 );
 select extensions.lives_ok(
@@ -55,7 +56,7 @@ select extensions.ok(
 select set_config('request.jwt.claims','{"sub":"20000000-0000-0000-0000-000000000001","role":"authenticated"}',true);
 select extensions.throws_ok(
  $$select public.acknowledge_urgent((select id from public.tickets where note='Call now'))$$,
- 'Only the urgent message recipient can acknowledge it',
+ 'Only the active recipient can acknowledge an open urgent message',
  'non-recipient cannot acknowledge urgent message'
 );
 select set_config('request.jwt.claims','{"sub":"20000000-0000-0000-0000-000000000002","role":"authenticated"}',true);

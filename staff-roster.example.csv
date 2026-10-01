@@ -1,3 +1,4 @@
-name,phone_e164,email,active
-Ananya Sen,+919900001001,ananya@example.com,true
-Rohan Das,+919900001002,rohan@example.com,true
+name,phone_e164,email,auth_email,role,department,active
+REPLACE Admin Name,+919900001001,replace-admin@example.com,,admin,Management,true
+REPLACE Staff Name,+919900001002,shared-team-inbox@example.com,shared-team-inbox+first@example.com,staff,Operations,true
+REPLACE Second Staff Name,+919900001003,shared-team-inbox@example.com,shared-team-inbox+second@example.com,staff,Operations,true

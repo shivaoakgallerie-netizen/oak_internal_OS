@@ -1,24 +1,47 @@
 import {readFile} from 'node:fs/promises';
 import {createClient} from '@supabase/supabase-js';
-
-const [csvPath]=process.argv.slice(2);
-if(!csvPath)throw new Error('Usage: npm run import:staff -- path/to/staff-roster.csv');
+import {parseStaffRoster,staffAuthFields,planRosterIdentity,rosterLoginEmail} from './staff-roster.mjs';
+try{process.loadEnvFile('.env');}catch(error){if(error.code!=='ENOENT')throw error;}
+const [csvPath,...flags]=process.argv.slice(2);
+if(!csvPath)throw new Error('Usage: npm run import:staff -- staff-roster.csv [--dry-run] [--send-password-links]');
+const send=flags.includes('--send-password-links'),dry=flags.includes('--dry-run');
 const url=process.env.SUPABASE_URL,key=process.env.SUPABASE_SERVICE_ROLE_KEY;
-if(!url||!key)throw new Error('Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in the process environment.');
+if(!dry&&(!url||!key||/replace|__|your-project/i.test(url+key)))throw new Error('Set the server-only SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY locally. Never add them to browser files.');
+if(send&&!dry&&!process.env.APP_URL)throw new Error('APP_URL is required for password links.');
+const rows=parseStaffRoster(await readFile(csvPath,'utf8'));
+if(dry){console.log('Validated '+rows.length+' staff rows. No accounts or messages changed.');process.exit(0);}
 const client=createClient(url,key,{auth:{persistSession:false,autoRefreshToken:false}});
-const parseLine=line=>{const values=[];let value='',quoted=false;for(let i=0;i<line.length;i++){const char=line[i];if(char==='"'&&line[i+1]==='"'){value+='"';i++}else if(char==='"')quoted=!quoted;else if(char===','&&!quoted){values.push(value.trim());value=''}else value+=char}values.push(value.trim());return values};
-const lines=(await readFile(csvPath,'utf8')).replace(/^\uFEFF/,'').split(/\r?\n/).filter(Boolean);
-const headers=parseLine(lines.shift()).map(value=>value.toLowerCase());
-const required=['name','phone_e164','email','active'];for(const field of required)if(!headers.includes(field))throw new Error(`CSV is missing ${field}`);
-const rows=lines.map((line,index)=>Object.fromEntries(headers.map((header,column)=>[header,parseLine(line)[column]??'']))).map((row,index)=>{
-  if(!row.name)throw new Error(`Row ${index+2}: name is required`);if(!/^\+[1-9]\d{7,14}$/.test(row.phone_e164))throw new Error(`Row ${index+2}: invalid E.164 phone`);if(!/^\S+@\S+\.\S+$/.test(row.email))throw new Error(`Row ${index+2}: invalid email`);return {...row,active:/^(true|1|yes)$/i.test(row.active)};
-});
-const users=[];for(let page=1;;page++){const result=await client.auth.admin.listUsers({page,perPage:1000});if(result.error)throw result.error;users.push(...result.data.users);if(result.data.users.length<1000)break}
-for(const row of rows){
-  let authUser=users.find(user=>user.phone===row.phone_e164||user.email?.toLowerCase()===row.email.toLowerCase());
-  if(!authUser){const created=await client.auth.admin.createUser({phone:row.phone_e164,email:row.email,phone_confirm:true,email_confirm:true,user_metadata:{name:row.name}});if(created.error)throw created.error;authUser=created.data.user}
-  const updated=await client.auth.admin.updateUserById(authUser.id,{phone:row.phone_e164,email:row.email,phone_confirm:true,email_confirm:true,user_metadata:{...authUser.user_metadata,name:row.name},ban_duration:row.active?'none':'876000h'});if(updated.error)throw updated.error;
-  const roster=await client.from('team_users').upsert({auth_user_id:authUser.id,name:row.name,phone:row.phone_e164,email:row.email,is_active:row.active},{onConflict:'phone'});if(roster.error)throw roster.error;
-  if(!row.active){const staff=await client.from('team_users').select('id').eq('phone',row.phone_e164).single();if(staff.data)await client.from('push_subscriptions').update({revoked_at:new Date().toISOString()}).eq('team_user_id',staff.data.id)}
-  console.log(`${row.active?'Activated':'Deactivated'} ${row.name} (${row.phone_e164})`);
+const check=result=>{if(result.error)throw result.error;return result.data;};
+const users=[];for(let page=1;;page++){const list=check(await client.auth.admin.listUsers({page,perPage:1000})).users;users.push(...list);if(list.length<1000)break;}
+const existingRoster=check(await client.from('team_users').select('id,auth_user_id,phone,email,role,is_active'));
+// Verify the migration before creating any Auth identities.
+const schemaReady=await client.from('team_users').select('notification_email').limit(0);
+if(schemaReady.error)throw new Error('Apply migrations/20260930_staff_notification_email.sql before importing. No accounts changed.');
+const planned=rows.map(row=>planRosterIdentity(row,users,existingRoster));
+const finalAdmins=new Set(existingRoster.filter(u=>u.role==='admin'&&u.is_active).map(u=>u.id));
+for(const {row,roster} of planned){if(roster)finalAdmins.delete(roster.id);if(row.active&&row.role==='admin')finalAdmins.add(roster?.id||row.phone_e164);}
+if(!finalAdmins.size)throw new Error('The roster must retain an active Admin.');
+// Validate all deactivations before changing any accounts.
+for(const {row,roster} of planned)if(!row.active&&roster){
+ const work=check(await client.from('tickets').select('id').eq('assignee_id',roster.id).neq('status','Resolved').limit(1));
+ if(work.length)throw new Error(row.name+': reassign or resolve open work before deactivation');
+}
+for(const item of planned){
+ const {row,roster}=item;let user=item.user;
+ if(!user){
+  user=check(await client.auth.admin.createUser(staffAuthFields(row,true))).user;
+  users.push(user); // Generated password is never logged, stored in files or shared.
+ }
+ // Removing roster access first fails closed if a later provider call fails.
+ if(!row.active&&roster)check(await client.from('team_users').update({is_active:false}).eq('id',roster.id));
+ user=check(await client.auth.admin.updateUserById(user.id,{...staffAuthFields(row),ban_duration:row.active?'none':'876000h'})).user;
+ const values={auth_user_id:user.id,name:row.name,phone:row.phone_e164,email:user.email||null,notification_email:row.email,role:row.role,department:row.department,is_active:row.active};
+ const member=check(await client.from('team_users').upsert(roster?{...values,id:roster.id}:values,{onConflict:roster?'id':'auth_user_id'}).select('id').single());
+ if(!row.active){
+  check(await client.from('push_subscriptions').update({revoked_at:new Date().toISOString()}).eq('team_user_id',member.id));
+  check(await client.from('notifications').update({state:'cancelled',processed_at:new Date().toISOString()}).eq('recipient_id',member.id).in('state',['queued','processing','failed']));
+ }
+ const loginEmail=rosterLoginEmail(row);
+ if(send&&row.active&&loginEmail)check(await client.auth.resetPasswordForEmail(loginEmail,{redirectTo:new URL('?setup=1',process.env.APP_URL).href}));
+ console.log((row.active?'Activated ':'Deactivated ')+row.name+' ('+row.role+')'+(send&&row.active&&loginEmail?' · password link requested':row.role==='staff'?' · '+(loginEmail?'email login '+loginEmail:'phone OTP')+'; notification email '+(row.email||'not set'):''));
 }

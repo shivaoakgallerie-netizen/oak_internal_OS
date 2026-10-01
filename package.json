@@ -6,10 +6,15 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "validate": "node scripts/validate.mjs",
-    "test": "node --test tests/demo-model.test.mjs",
-    "import:staff": "node scripts/import-staff.mjs"
+    "test": "node --test tests/*.test.mjs",
+    "start": "npm run build && node scripts/serve.mjs",
+    "import:staff": "node scripts/import-staff.mjs",
+    "setup:staff-passwords": "node scripts/staff-password-links.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8"
   }
 }
