@@ -88,6 +88,16 @@ test('login uses server password verification and derives actor from verified us
  await assert.rejects(()=>repo.login('shared+first@example.test','test-only-user-input'),/active staff roster/);assert.equal(signouts,1);
 });
 
+test('an authenticated user changes their own password only after supplying the current password',async()=>{
+ let submitted;
+ const fake={auth:{updateUser:async args=>{submitted=args;return {data:{}};}}};
+ const repo=new LiveRepository({supabaseUrl:'https://example.supabase.co',publishableKey:'sb_publishable_public'},()=>fake);
+ await assert.rejects(()=>repo.changePassword('','new-password-123'),/current password/);
+ await assert.rejects(()=>repo.changePassword('old-password','short'),/at least 12/);
+ await repo.changePassword('old-password','new-password-123');
+ assert.deepEqual(submitted,{password:'new-password-123',current_password:'old-password'});
+});
+
 test('request and upload RPCs return one record and never submit a forged actor',async()=>{
  const calls=[],deleted=[],storage={upload:async()=>({data:{}}),remove:async paths=>{deleted.push(...paths);return {data:[]};},createSignedUrl:async(path,seconds)=>{assert.equal(seconds,300);return {data:{signedUrl:'https://example.test/private'}};}};
  const fake={rpc:(name,args)=>{calls.push([name,args]);return {single:async()=>name==='reserve_attachment'?{data:{id:'reservation',storage_path:'ticket/file.jpg'}}:name==='finalize_attachment'?{error:new Error('Upload no longer permitted')}:{data:{id:'ticket'}}};},storage:{from:name=>{assert.equal(name,'service-photos');return storage;}}};

@@ -81,4 +81,9 @@ export class LiveRepository {
     checked(await this.client.auth.resetPasswordForEmail(email,{redirectTo:location.origin+location.pathname+'?setup=1',captchaToken:captchaToken||undefined}));
   }
   async setPassword(password) {checked(await this.client.auth.updateUser({password}));}
+  async changePassword(currentPassword,password) {
+    if(!currentPassword)throw new Error('Enter your current password.');
+    if(!password||password.length<12)throw new Error('Use a new password with at least 12 characters.');
+    checked(await this.client.auth.updateUser({password,current_password:currentPassword}));
+  }
 }

@@ -36,7 +36,7 @@ Under **URL Configuration**, set the real HTTPS application URL and allow its ex
 
 ## 3. Admin and Staff accounts
 
-Aditya Nahata's Admin account is active and remains linked to `adityanahata@oakgallerie.com`. Choose or verify the personal password through the recovery flow, then check normal sign-in. The registered Staff logins are:
+Aditya Nahata's Admin account is active and linked to `aditya@oakgallerie.com`. After signing in, Admin and Staff can use the app's **Change password** button to enter their current password and set a new one without sending an email. A user who does not know the current password must use the recovery flow. The registered Staff logins are:
 
 | Staff member | Login email | Notification email |
 |---|---|---|
@@ -112,4 +112,4 @@ Set server secrets VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT, RESEND_AP
 
 Create Vault secrets project_url/service_role_key, then run `supabase/cron.sql`: worker every minute, scan every five minutes. Activate recurring jobs only when providers and staff recipients are ready. Test real provider delivery, private uploads, inactive-account denial, urgent reassignment, overdue reminders and device logout before rollout.
 
-All 17 automated tests, validation and the build pass. The SQL tests use embedded PostgreSQL with Supabase Auth/Storage interfaces stubbed. They verify actual SQL permissions but do not replace hosted password sign-in, inbox delivery, actual Storage upload or device delivery tests.
+The automated tests, validation and the build verify the application. The SQL tests use embedded PostgreSQL with Supabase Auth/Storage interfaces stubbed. They verify actual SQL permissions but do not replace hosted password sign-in, inbox delivery, actual Storage upload or device delivery tests.

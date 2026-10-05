@@ -1,4 +1,4 @@
-const CACHE = 'oak-shell-secure-v6';
+const CACHE = 'oak-shell-secure-v7';
 const SHELL = [
   './', './index.html', './styles.css', './prototype.css', './app.js',
   './workflow-rules.js', './live-client.js', './legacy-cleanup.js', './config.js', './vendor/supabase.js', './icons/logo.png', './icons/symbol.png', './manifest.webmanifest', './icons/oak-mark.svg'

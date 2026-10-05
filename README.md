@@ -19,6 +19,8 @@ Open http://localhost:8080. The local server serves only the built dist director
 
 There are no default passwords or demo bypass. Both Staff and Admin sign in with their registered email and an individual password. Staff roster auth_email is the unique login address; email is the notification address and may be shared. Admin email remains the login and recovery address. The chosen login does not require SMS, Twilio or Phone Auth. Verified sessions must match the active roster. Session tokens stay in the current tab across reloads and are removed on sign-out. Request records and media are not cached locally.
 
+After signing in, a user can select **Change password** in the top bar, enter their current password and choose a new password of at least 12 characters. This changes the password directly through Supabase Auth and does not send an email. A user who has forgotten their current password must still use password recovery.
+
 The Staff addresses use Google Workspace plus-address variations intended to reach the same info mailbox; actual inbox delivery has not yet been tested. Separate Auth accounts preserve attribution in the workflow, but anyone able to read the shared inbox can reset either Staff password. They do not provide strong individual identity assurance against other readers of that mailbox.
 
 ## Access

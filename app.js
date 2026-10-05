@@ -273,6 +273,13 @@ function bind() {
     };
   }
   $('logout').onclick = logout; $('newTicketBtn').onclick = openNew; $('ticketType').onchange = updateTypeFields; $('reminderPreset').onchange = updateTypeFields; $('clientSelect').onchange = fillProjects; $('ticketFiles').onchange = previewFiles;
+  $('changePasswordBtn').onclick=()=>{if(!busy&&currentUser){$('changePasswordForm').reset();$('changePasswordDialog').showModal();$('currentPassword').focus();}};
+  $('changePasswordForm').onsubmit=event=>{event.preventDefault();run($('saveChangedPassword'),async()=>{
+    const password=$('changedPassword').value;
+    if(password!==$('repeatChangedPassword').value)throw new Error('Enter the same new password twice.');
+    await repository.changePassword($('currentPassword').value,password);
+    $('changePasswordForm').reset();$('changePasswordDialog').close();toast('Your password has been changed.');
+  });};
   $('newProjectBtn').onclick=()=>{if(canManage(currentUser)&&!busy){$('projectForm').reset();$('projectDialog').showModal();}};
   $('projectForm').onsubmit=event=>{event.preventDefault();run($('saveProject'),async()=>{
     await change(()=>repository.createProject({clientName:$('projectClientName').value,clientPhone:$('projectClientPhone').value,projectName:$('newProjectName').value,address:$('newProjectAddress').value}));

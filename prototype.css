@@ -1432,5 +1432,13 @@ button.ticket:focus-visible {
     transform: none;
   }
 }
-.login-modes { display:flex; gap:12px; margin-bottom:24px; }
-.login-modes .btn { flex:1; }
+
+.login-modes {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.login-modes .btn {
+  flex: 1;
+}

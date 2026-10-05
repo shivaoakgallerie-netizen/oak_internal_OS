@@ -2,7 +2,7 @@
 
 Complete SUPABASE-SETUP.md first. Former demo passwords no longer work. Use clearly labelled TEST requests and harmless sample photos.
 
-Staff selects Staff and signs in with their alias and individual password: Rohit uses info+rohit@oakgallerie.com; Shibani uses info+shibani@oakgallerie.com. Admin selects Admin and signs in with adityanahata@oakgallerie.com and the Admin password. Private local setup links have been generated, but Staff passwords have not yet been set. Follow SUPABASE-SETUP.md to use or regenerate the links without sending email, or request setup emails only when sending is authorized and SMTP is ready. Custom SMTP is currently disabled.
+Staff selects Staff and signs in with their alias and individual password: Rohit uses info+rohit@oakgallerie.com; Shibani uses info+shibani@oakgallerie.com. Admin selects Admin and signs in with aditya@oakgallerie.com and the Admin password. Private local setup links have been generated, but Staff passwords have not yet been set. Follow SUPABASE-SETUP.md to use or regenerate the links without sending email, or request setup emails only when sending is authorized and SMTP is ready. Custom SMTP is currently disabled.
 
 Check that incorrect passwords are denied, unlisted/inactive accounts cannot load requests, the selected role matches the authenticated account, and password recovery works for both roles. Test expired or reused recovery links. Verify each account shows the correct name and retains its existing Auth ID, roster ID, phone and request history. Phone Auth, Twilio and SMS are not needed for these tests.
 
