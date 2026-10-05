@@ -1,5 +1,7 @@
 -- Oak Gallerie secure Admin/Staff schema. NEW installations only.
 -- Existing installations apply migrations/20260930_secure_admin_staff.sql.
+-- All installations also apply migrations/20261005_admin_managed_accounts.sql
+-- to enable Admin account management and block Staff credential self-service.
 begin;
 create extension if not exists pgcrypto;
 

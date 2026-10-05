@@ -1,4 +1,4 @@
-import { TYPE_LABEL, ROLE_LABEL, ROLE_DESCRIPTION, allowedTypes, canManage, canView, canUpdate, canAssign, canAcknowledge, canAttach, recipients } from './workflow-rules.js';
+import { TYPE_LABEL, ROLE_LABEL, ROLE_DESCRIPTION, allowedTypes, canManage, canView, canUpdate, canAssign, canAcknowledge, canAttach, recipients, normalizePhone } from './workflow-rules.js';
 import { LiveRepository } from './live-client.js';
 import { scrubLegacyCredentials } from './legacy-cleanup.js';
 
@@ -12,6 +12,7 @@ let repository, workspace = {clients:[],team:[],projects:[],tickets:[],events:[]
 let currentUser=null,currentTicketId=null,currentView='requests',busy=false,connected=false,authGeneration=0,captchaWidget;
 let mediaURLs=[],previewURLs=[],mediaVersion=0;
 let loginMode='staff';
+let accountAction='create',accountId=null,accountCaptchaWidget,changeCaptchaWidget;
 const state=()=>workspace;
 const userById = id => state().team.find(user => user.id === id);
 const actorName = authId => state().team.find(user => user.auth_user_id === authId)?.name || 'System';
@@ -33,7 +34,8 @@ function clearWorkspace() {
   authGeneration++;currentUser=null;connected=false;workspace={clients:[],team:[],projects:[],tickets:[],events:[],attachments:[],notifications:[],deliveries:[]};
   closeDetail();for(const dialog of document.querySelectorAll('dialog[open]'))dialog.close();revokeURLs(previewURLs);
   for(const id of ['ticketList','inboxList','staffList','reportSummary','typeReport','workloadReport','resolvedReport','deliveryList','deliverySummary','detailTimeline','detailDelivery','detailMedia'])$(id).replaceChildren();
-  show('workspace',false);show('login',true);show('recoveryForm',false);show('passwordSetupForm',false);$('loginForm').reset();$('passwordSetupForm').reset();setLoginMode(loginMode);
+  $('staffAccountForm').reset();$('changePasswordForm').reset();accountId=null;
+  show('workspace',false);show('login',true);$('loginForm').reset();setLoginMode(loginMode);
 }
 function setLoginMode(mode) {
   loginMode=mode;$('loginPassword').value='';
@@ -41,7 +43,7 @@ function setLoginMode(mode) {
   $('loginHint').textContent=mode==='staff'?'Use your own registered email or staff email alias and password.':'Use your registered administrator email and password.';
   $('loginPhone').placeholder=mode==='staff'?'Your staff email alias':'Admin email';
   show('loginModes',true);show('loginForm',true);
-  for(const id of ['recoveryForm','passwordSetupForm','loginError'])show(id,false);
+  show('loginError',false);
   for(const [id,selected] of [['staffLoginMode',mode==='staff'],['adminLoginMode',mode==='admin']]){
     $(id).classList.toggle('primary',selected);$(id).setAttribute('aria-pressed',String(selected));
   }
@@ -67,11 +69,18 @@ async function run(button,action) {
   busy=true;const original=button?.textContent;if(button){button.disabled=true;button.textContent='Please wait…';}
   try {await action();}catch(error){reportError(error);}finally{busy=false;if(button){button.disabled=false;button.textContent=original;}}
 }
-function captchaToken() {return captchaWidget===undefined?undefined:globalThis.turnstile?.getResponse(captchaWidget);}
-function resetCaptcha() {if(captchaWidget!==undefined)globalThis.turnstile?.reset(captchaWidget);}
+function captchaToken(widget=captchaWidget) {return widget===undefined?undefined:globalThis.turnstile?.getResponse(widget);}
+function resetCaptcha(widget=captchaWidget) {if(widget!==undefined)globalThis.turnstile?.reset(widget);}
+function mountCaptcha(container,widget) {
+  const siteKey=window.OAK_CONFIG?.captchaSiteKey;
+  if(!siteKey||siteKey.includes('__'))return widget;
+  if(!window.turnstile)throw new Error('Security verification is still loading. Reopen the form shortly.');
+  if(widget===undefined)return window.turnstile.render('#'+container,{sitekey:siteKey});
+  resetCaptcha(widget);return widget;
+}
 async function enterWorkspace() {
   await refresh();
-  show('login',false);show('passwordSetupForm',false);show('recoveryForm',false);show('workspace',true);
+  show('login',false);show('workspace',true);
   $('search').value='';$('scopeFilter').value='relevant';$('typeFilter').value='';$('statusFilter').value='';
   switchView('requests');
   // Allow the read RPC when restoring a request link inside the login action.
@@ -108,6 +117,7 @@ function renderAll() {
   $('demoTime').textContent = fmt(Date.now()); $('storageStatus').textContent = connected ? 'Connected to Supabase' : 'Connection unavailable';
   document.querySelectorAll('[data-view]').forEach(button => button.classList.toggle('hidden', !viewAllowed(button.dataset.view)));
   show('newProjectBtn',canManage(currentUser));
+  show('changePasswordBtn',canManage(currentUser));
   $('scopeFilter').options[0].textContent = canManage(currentUser) ? 'All team requests' : 'My workspace';
   renderTickets(); renderInbox(); if (currentUser.role === 'admin') renderStaff(); else $('staffList').innerHTML = '';
   if (canManage(currentUser)) { renderReports(); renderDeliveries() } else for (const id of ['reportSummary', 'typeReport', 'workloadReport', 'resolvedReport', 'deliverySummary', 'deliveryList']) $(id).innerHTML = '';
@@ -133,8 +143,33 @@ function renderStaff() {
   if (currentUser.role !== 'admin') return;
   $('staffList').innerHTML = state().team.map(user => {
     const assigned = state().tickets.filter(t => t.assignee_id === user.id && t.status !== 'Resolved'), blocked = assigned.length || user.id === currentUser.id;
-    return '<article class="card staff-card"><div class="staff-heading"><span class="staff-avatar">' + esc(initials(user.name)) + '</span><div class="staff-details"><h2>' + esc(user.name) + '</h2><span>' + esc(ROLE_LABEL[user.role]) + '</span></div>' + badge(user.is_active ? 'Active' : 'Inactive', user.is_active ? 'resolved' : '') + '</div><div class="staff-meta"><p>' + esc(user.department) + '</p><p>' + esc(user.email?'Login: '+user.email:'Phone-only login') + '<br>' + esc('Notifications: '+(user.notification_email||user.email||'not configured')) + '<br>' + esc(user.phone) + '</p><p><strong>' + assigned.length + '</strong> open assigned · ' + assigned.filter(isDue).length + ' overdue</p></div><div class="staff-actions"><button class="btn compact" data-staff="' + esc(user.id) + '" ' + (user.is_active && blocked ? 'disabled' : '') + '>' + (user.is_active ? 'Deactivate login' : 'Activate login') + '</button><span class="hint">' + (user.id === currentUser.id ? 'Your own login stays active.' : assigned.length ? 'Resolve or reassign open work before deactivating.' : 'Deactivation immediately blocks database access.') + '</span></div></article>';
+    const actions=user.role==='staff'?'<button class="btn compact" data-account="'+esc(user.id)+'">Manage account</button><button class="btn compact" data-staff="'+esc(user.id)+'" '+(user.is_active&&blocked?'disabled':'')+'>'+(user.is_active?'Deactivate login':'Activate login')+'</button>':'';
+    return '<article class="card staff-card"><div class="staff-heading"><span class="staff-avatar">' + esc(initials(user.name)) + '</span><div class="staff-details"><h2>' + esc(user.name) + '</h2><span>' + esc(ROLE_LABEL[user.role]) + '</span></div>' + badge(user.is_active ? 'Active' : 'Inactive', user.is_active ? 'resolved' : '') + '</div><div class="staff-meta"><p>' + esc(user.department) + '</p><p>' + esc(user.email?'Login: '+user.email:'Login email not configured') + '<br>' + esc('Notifications: '+(user.notification_email||user.email||'not configured')) + '<br>' + esc(user.phone) + '</p><p><strong>' + assigned.length + '</strong> open assigned · ' + assigned.filter(isDue).length + ' overdue</p></div><div class="staff-actions">'+actions+'<span class="hint">' + (user.id === currentUser.id ? 'Your own login stays active.' : assigned.length ? 'Resolve or reassign open work before deactivating.' : 'Deactivation immediately blocks database access.') + '</span></div></article>';
   }).join('');
+}
+function openStaffAccount(action,id=null) {
+  if(busy||!canManage(currentUser))return;
+  const member=id?userById(id):null;if(id&&member?.role!=='staff')throw new Error('Select a Staff account.');
+  accountAction=action;accountId=id;$('staffAccountForm').reset();
+  $('accountFields').disabled=action==='access';show('accountFields',action!=='access');
+  $('accountPassword').required=action==='create';$('accountPasswordRepeat').required=action==='create';
+  $('staffAccountTitle').textContent=action==='create'?'Create staff login':action==='access'?(member.is_active?'Deactivate':'Activate')+' '+member.name:'Manage '+member.name;
+  $('accountActionHint').textContent=action==='create'?'Choose the login email and initial password. Staff will use these to sign in.':action==='access'?'Verify your Admin password to change this account’s access.':'Update staff details. Leave the new password blank to keep the current password.';
+  if(member){$('accountName').value=member.name;$('accountDepartment').value=member.department;$('accountEmail').value=member.email||'';$('accountPhone').value=member.phone;$('accountNotificationEmail').value=member.notification_email||'';}
+  $('staffAccountDialog').showModal();
+  accountCaptchaWidget=mountCaptcha('accountCaptcha',accountCaptchaWidget);
+}
+async function saveStaffAccount(event) {
+  event.preventDefault();await run($('saveStaffAccount'),async()=>{
+    if(!canManage(currentUser))throw new Error('Only Admin can manage accounts.');
+    const password=$('accountPassword').value;
+    if(password!==$('accountPasswordRepeat').value)throw new Error('Enter the same staff password twice.');
+    const input={action:accountAction,id:accountId,currentPassword:$('accountAdminPassword').value,captchaToken:captchaToken(accountCaptchaWidget)};
+    if(accountAction==='access')input.active=!userById(accountId).is_active;
+    else Object.assign(input,{name:$('accountName').value,department:$('accountDepartment').value,email:$('accountEmail').value,phone:normalizePhone($('accountPhone').value),notificationEmail:$('accountNotificationEmail').value,password:password||undefined});
+    try{await change(()=>repository.manageStaff(input));$('staffAccountForm').reset();$('staffAccountDialog').close();toast('Staff account saved.');}
+    finally{$('accountAdminPassword').value='';$('accountPassword').value='';$('accountPasswordRepeat').value='';resetCaptcha(accountCaptchaWidget);}
+  });
 }
 function bars(rows) {
   const max = Math.max(1, ...rows.map(row => row[1]));
@@ -273,11 +308,14 @@ function bind() {
     };
   }
   $('logout').onclick = logout; $('newTicketBtn').onclick = openNew; $('ticketType').onchange = updateTypeFields; $('reminderPreset').onchange = updateTypeFields; $('clientSelect').onchange = fillProjects; $('ticketFiles').onchange = previewFiles;
-  $('changePasswordBtn').onclick=()=>{if(!busy&&currentUser){$('changePasswordForm').reset();$('changePasswordDialog').showModal();$('currentPassword').focus();}};
+  $('newStaffBtn').onclick=()=>openStaffAccount('create');$('staffAccountForm').onsubmit=saveStaffAccount;
+  $('staffAccountDialog').addEventListener('close',()=>{$('staffAccountForm').reset();accountId=null;});
+  $('changePasswordDialog').addEventListener('close',()=>{$('changePasswordForm').reset();});
+  $('changePasswordBtn').onclick=()=>{if(!busy&&canManage(currentUser)){$('changePasswordForm').reset();$('changePasswordDialog').showModal();$('currentPassword').focus();try{changeCaptchaWidget=mountCaptcha('changeCaptcha',changeCaptchaWidget);}catch(error){reportError(error);}}};
   $('changePasswordForm').onsubmit=event=>{event.preventDefault();run($('saveChangedPassword'),async()=>{
     const password=$('changedPassword').value;
     if(password!==$('repeatChangedPassword').value)throw new Error('Enter the same new password twice.');
-    await repository.changePassword($('currentPassword').value,password);
+    try{await repository.changePassword($('currentPassword').value,password,captchaToken(changeCaptchaWidget));}finally{resetCaptcha(changeCaptchaWidget);}
     $('changePasswordForm').reset();$('changePasswordDialog').close();toast('Your password has been changed.');
   });};
   $('newProjectBtn').onclick=()=>{if(canManage(currentUser)&&!busy){$('projectForm').reset();$('projectDialog').showModal();}};
@@ -295,7 +333,8 @@ function bind() {
   document.addEventListener('click', event => {
     const request = event.target.closest('[data-request]'); if (request) openTicket(request.dataset.request).catch(reportError);
     const retry = event.target.closest('[data-retry]'); if (retry) run(retry, async () => { await change(()=>repository.retryDelivery(retry.dataset.retry));toast('Delivery queued for the worker.'); });
-    const staff = event.target.closest('[data-staff]'); if (staff) run(staff, async () => { const member = userById(staff.dataset.staff); await change(()=>repository.setStaffActive(member.id,!member.is_active));toast('Staff database access updated.'); });
+    const account=event.target.closest('[data-account]');if(account)openStaffAccount('update',account.dataset.account);
+    const staff = event.target.closest('[data-staff]'); if (staff) openStaffAccount('access',staff.dataset.staff);
   });
   window.addEventListener('hashchange', () => handleDeepLink().catch(reportError));
 }
@@ -314,21 +353,8 @@ async function start() {
   bind();await scrubLegacyCredentials();
   $('staffLoginMode').onclick=()=>{if(!busy)setLoginMode('staff');};
   $('adminLoginMode').onclick=()=>{if(!busy)setLoginMode('admin');};
-  $('forgotPassword').onclick=()=>{$('recoveryEmail').value=$('loginPhone').value;show('loginModes',false);show('loginForm',false);show('recoveryForm',true);};
-  $('backToLogin').onclick=()=>setLoginMode(loginMode);
-  $('recoveryForm').onsubmit=event=>{event.preventDefault();run($('recoveryBtn'),async()=>{
-    try {await repository.recover($('recoveryEmail').value.trim(),captchaToken());}finally{resetCaptcha();}
-    toast('If your registered email has an account, a password link will arrive.');$('recoveryForm').reset();
-  });};
-  $('passwordSetupForm').onsubmit=event=>{event.preventDefault();run($('passwordSetupBtn'),async()=>{
-    const password=$('newPassword').value;
-    if(password.length<12||password!==$('repeatPassword').value)throw new Error('Use at least 12 characters and enter the same password twice.');
-    await repository.profile();await repository.setPassword(password);$('passwordSetupForm').reset();
-    history.replaceState(null,'',location.pathname);await enterWorkspace();toast('Your password has been set.');
-  });};
   $('refreshBtn').onclick=()=>run($('refreshBtn'),()=>refresh());
   $('pushBtn').onclick=()=>run($('pushBtn'),enablePush);
-  const needsPasswordSetup=new URLSearchParams(location.search).get('setup')==='1'||new URLSearchParams(location.hash.slice(1)).get('type')==='recovery';
   repository=new LiveRepository(window.OAK_CONFIG);
   if('serviceWorker' in navigator)navigator.serviceWorker.register('service-worker.js').catch(reportError);
   const siteKey=window.OAK_CONFIG?.captchaSiteKey;
@@ -336,17 +362,12 @@ async function start() {
     const script=document.createElement('script');script.src='https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
     script.onload=()=>{captchaWidget=window.turnstile.render('#captcha',{sitekey:siteKey});};document.head.append(script);
   }
-  const showSetup=async()=>{const user=await repository.profile();$('setupIdentity').textContent=user.name+' · '+(user.email||user.phone);show('workspace',false);show('login',true);show('loginModes',false);show('loginForm',false);show('recoveryForm',false);show('passwordSetupForm',true);};
   repository.client.auth.onAuthStateChange((event,session)=>{
     if(event==='SIGNED_OUT')clearWorkspace();
-    if(event==='PASSWORD_RECOVERY')setTimeout(()=>showSetup().catch(reportError),0);
   });
   try {
     const {data,error}=await repository.client.auth.getSession();if(error)throw error;
-    if(data.session){
-      if(needsPasswordSetup)await showSetup();
-      else await enterWorkspace();
-    }
+    if(data.session)await enterWorkspace();
   }catch(error){
     clearWorkspace();await repository.logout().catch(()=>{});
     $('loginError').textContent=error.message;show('loginError',true);

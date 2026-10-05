@@ -3,11 +3,11 @@ import {createClient} from '@supabase/supabase-js';
 import {parseStaffRoster,staffAuthFields,planRosterIdentity,rosterLoginEmail} from './staff-roster.mjs';
 try{process.loadEnvFile('.env');}catch(error){if(error.code!=='ENOENT')throw error;}
 const [csvPath,...flags]=process.argv.slice(2);
-if(!csvPath)throw new Error('Usage: npm run import:staff -- staff-roster.csv [--dry-run] [--send-password-links]');
-const send=flags.includes('--send-password-links'),dry=flags.includes('--dry-run');
+if(!csvPath)throw new Error('Usage: npm run import:staff -- staff-roster.csv [--dry-run]');
+if(flags.some(flag=>flag!=='--dry-run'))throw new Error('Only --dry-run is supported. Admin manages passwords in the app; setup links have been removed.');
+const dry=flags.includes('--dry-run');
 const url=process.env.SUPABASE_URL,key=process.env.SUPABASE_SERVICE_ROLE_KEY;
 if(!dry&&(!url||!key||/replace|__|your-project/i.test(url+key)))throw new Error('Set the server-only SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY locally. Never add them to browser files.');
-if(send&&!dry&&!process.env.APP_URL)throw new Error('APP_URL is required for password links.');
 const rows=parseStaffRoster(await readFile(csvPath,'utf8'));
 if(dry){console.log('Validated '+rows.length+' staff rows. No accounts or messages changed.');process.exit(0);}
 const client=createClient(url,key,{auth:{persistSession:false,autoRefreshToken:false}});
@@ -42,6 +42,5 @@ for(const item of planned){
   check(await client.from('notifications').update({state:'cancelled',processed_at:new Date().toISOString()}).eq('recipient_id',member.id).in('state',['queued','processing','failed']));
  }
  const loginEmail=rosterLoginEmail(row);
- if(send&&row.active&&loginEmail)check(await client.auth.resetPasswordForEmail(loginEmail,{redirectTo:new URL('?setup=1',process.env.APP_URL).href}));
- console.log((row.active?'Activated ':'Deactivated ')+row.name+' ('+row.role+')'+(send&&row.active&&loginEmail?' · password link requested':row.role==='staff'?' · '+(loginEmail?'email login '+loginEmail:'phone OTP')+'; notification email '+(row.email||'not set'):''));
+ console.log((row.active?'Activated ':'Deactivated ')+row.name+' ('+row.role+')'+(row.role==='staff'?' · '+(loginEmail?'email login '+loginEmail:'login email missing')+'; notification email '+(row.email||'not set'):''));
 }

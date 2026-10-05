@@ -772,3 +772,8 @@ dialog::backdrop {
         font-size: 34px
     }
 }
+
+.account-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 24px; }
+.account-fields { border: 0; padding: 0; margin: 0; min-width: 0; }
+.account-toolbar .btn { flex-shrink: 0; }
+@media (max-width: 640px) { .account-toolbar { align-items: stretch; flex-direction: column; } }

@@ -21,17 +21,6 @@ export class LiveRepository {
     if(!user?.is_active || !['admin','staff'].includes(user.role))throw new Error('Your account is not on the active staff roster. Contact the administrator.');
     return user;
   }
-  async requestPhoneOtp(phone,captchaToken) {
-    const normalized=normalizePhone(phone);
-    checked(await this.client.auth.signInWithOtp({phone:normalized,options:{shouldCreateUser:false,captchaToken:captchaToken||undefined,channel:'sms'}}));
-    return normalized;
-  }
-  async verifyPhoneOtp(phone,token) {
-    if(!/^\d{6,10}$/.test(String(token)))throw new Error('Enter the numeric code received by SMS.');
-    checked(await this.client.auth.verifyOtp({phone:normalizePhone(phone),token:String(token),type:'sms'}));
-    try {return await this.profile();}
-    catch(error){await this.logout().catch(()=>{});throw error;}
-  }
   async load() {
     const currentUser=await this.profile();
     const names=['clients','projects','tickets','request_events','attachments','notifications','delivery_attempts'];
@@ -52,7 +41,16 @@ export class LiveRepository {
   assign(id,assigneeId) {return this.record('assign_request',{p_ticket_id:id,p_assignee_id:assigneeId});}
   acknowledge(id) {return this.record('acknowledge_urgent',{p_ticket_id:id});}
   read(id) {return this.rpc('mark_request_read',{p_ticket_id:id});}
-  setStaffActive(id,active) {return this.rpc('set_staff_active',{p_team_user_id:id,p_active:active});}
+  async manageStaff(input) {
+    if((await this.profile()).role!=='admin')throw new Error('Only Admin can manage accounts.');
+    const result=await this.client.functions.invoke('manage-staff',{body:input});
+    if(result.error){
+      const details=await result.error.context?.json().catch(()=>null);
+      throw new Error(details?.error||result.error.message||'Account management is unavailable.');
+    }
+    if(result.data?.error)throw new Error(result.data.error);
+    return result.data;
+  }
   retryDelivery(id) {return this.rpc('retry_notification',{p_notification_id:id});}
   createProject(input) {return this.record('create_project',{p_client_name:input.clientName,p_client_phone:normalizePhone(input.clientPhone),p_project_name:input.projectName,p_site_address:input.address||null});}
   async upload(id,files,onProgress=()=>{}) {
@@ -77,13 +75,13 @@ export class LiveRepository {
     try {checked(await this.client.auth.signOut({scope:'local'}));}
     finally {globalThis.sessionStorage?.removeItem('oak-auth-session');globalThis.sessionStorage?.removeItem('oak-auth-session-code-verifier');}
   }
-  async recover(email,captchaToken) {
-    checked(await this.client.auth.resetPasswordForEmail(email,{redirectTo:location.origin+location.pathname+'?setup=1',captchaToken:captchaToken||undefined}));
-  }
-  async setPassword(password) {checked(await this.client.auth.updateUser({password}));}
-  async changePassword(currentPassword,password) {
+  async changePassword(currentPassword,password,captchaToken) {
+    const admin=await this.profile();
+    if(admin.role!=='admin')throw new Error('Only Admin can change passwords. Contact your administrator.');
     if(!currentPassword)throw new Error('Enter your current password.');
     if(!password||password.length<12)throw new Error('Use a new password with at least 12 characters.');
+    const verified=checked(await this.client.auth.signInWithPassword({email:admin.email,password:currentPassword,options:captchaToken?{captchaToken}:undefined}));
+    if(verified?.user?.id!==admin.auth_user_id)throw new Error('Admin password could not be verified.');
     checked(await this.client.auth.updateUser({password,current_password:currentPassword}));
   }
 }

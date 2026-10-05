@@ -5,6 +5,7 @@ import {PGlite} from '@electric-sql/pglite';
 import {normalizePhone,validatePublicConfig,allowedTypes,canUpdate,canView,canAcknowledge} from '../workflow-rules.js';
 import {LiveRepository} from '../live-client.js';
 import {parseStaffRoster,staffAuthFields,planRosterIdentity} from '../scripts/staff-roster.mjs';
+import {manageStaff} from '../supabase/functions/manage-staff/handler.js';
 
 test('phone-only roster keeps two distinct identities without fake email or passwords',()=>{
  const header='name,phone_e164,email,role,active\n';
@@ -15,17 +16,6 @@ test('phone-only roster keeps two distinct identities without fake email or pass
  assert.equal(parseStaffRoster('name,phone_e164,role,active\nFirst,+919900001111,staff,true')[0].email,null);
 });
 
-test('phone OTP never self-registers and rejects unlisted or inactive verified identities',async()=>{
- const calls=[];let allowed=true,logoutCount=0;
- const fake={auth:{signInWithOtp:async args=>{calls.push(args);return {data:{}};},verifyOtp:async args=>{calls.push(args);return {data:{}};},getUser:async()=>({data:{user:{id:'verified-auth'}}}),signOut:async()=>{logoutCount++;return {data:{}};}},from:()=>({select:()=>({eq:()=>({maybeSingle:async()=>({data:allowed?{id:'staff',role:'staff',is_active:true,email:null}:null})})})})};
- const repo=new LiveRepository({supabaseUrl:'https://example.supabase.co',publishableKey:'sb_publishable_public'},()=>fake);
- assert.equal(await repo.requestPhoneOtp('9900001111','captcha-test'),'+919900001111');
- assert.equal(calls[0].options.shouldCreateUser,false);assert.equal(calls[0].options.channel,'sms');assert.equal(calls[0].options.captchaToken,'captcha-test');assert.equal('email' in calls[0],false);
- await assert.rejects(()=>repo.verifyPhoneOtp('9900001111','bad'),/numeric code/);
- assert.equal((await repo.verifyPhoneOtp('9900001111','123456')).email,null);
- assert.equal(calls[1].type,'sms');
- allowed=false;await assert.rejects(()=>repo.verifyPhoneOtp('9900001111','123456'),/active staff roster/);assert.equal(logoutCount,1);
-});
 
 test('shared notification email never links Staff to one shared Auth account',()=>{
  const rows=parseStaffRoster('name,phone_e164,email,role,active\nFirst,+919900001111,shared@example.test,staff,true\nSecond,+919900001112,shared@example.test,staff,true');
@@ -88,14 +78,53 @@ test('login uses server password verification and derives actor from verified us
  await assert.rejects(()=>repo.login('shared+first@example.test','test-only-user-input'),/active staff roster/);assert.equal(signouts,1);
 });
 
-test('an authenticated user changes their own password only after supplying the current password',async()=>{
- let submitted;
- const fake={auth:{updateUser:async args=>{submitted=args;return {data:{}};}}};
+test('only Admin has client account actions and current-password changes',async()=>{
+ let submitted,role='admin';
+ const fake={auth:{getUser:async()=>({data:{user:{id:'actor'}}}),signInWithPassword:async()=>({data:{user:{id:'actor'}}}),updateUser:async args=>{submitted=args;return {data:{}};}},from:()=>({select:()=>({eq:()=>({maybeSingle:async()=>({data:{role,is_active:true,email:'owner@example.test',auth_user_id:'actor'}})})})})};
  const repo=new LiveRepository({supabaseUrl:'https://example.supabase.co',publishableKey:'sb_publishable_public'},()=>fake);
  await assert.rejects(()=>repo.changePassword('','new-password-123'),/current password/);
  await assert.rejects(()=>repo.changePassword('old-password','short'),/at least 12/);
  await repo.changePassword('old-password','new-password-123');
  assert.deepEqual(submitted,{password:'new-password-123',current_password:'old-password'});
+ submitted=null;fake.auth.signInWithPassword=async()=>({error:new Error('Invalid login credentials')});
+ await assert.rejects(()=>repo.changePassword('wrong-current-password','new-password-123'),/Invalid login/);assert.equal(submitted,null);
+ role='staff';submitted=null;
+ await assert.rejects(()=>repo.changePassword('old-password','new-password-123'),/Only Admin/);
+ await assert.rejects(()=>repo.manageStaff({action:'create'}),/Only Admin/);assert.equal(submitted,null);
+ assert.equal(repo.recover,undefined);assert.equal(repo.setPassword,undefined);assert.equal(repo.requestPhoneOtp,undefined);
+});
+
+test('server account management rejects forged roles and bad Admin passwords before any Auth mutation',async()=>{
+ let role='staff',active=true,reauth=0,mutations=0;
+ const client={auth:{getUser:async()=>({data:{user:{id:'actor',email:'admin@example.test',user_metadata:{role:'admin'}}}}),admin:{createUser:async()=>{mutations++;return {data:{user:{id:'new-staff'}}};},deleteUser:async()=>({data:{}})}},from:()=>({select:()=>({eq:()=>({maybeSingle:async()=>({data:{role,is_active:active}})})})}),rpc:async()=>({data:{id:'new-roster'}})};
+ const reauthClient={auth:{signInWithPassword:async()=>{reauth++;return {error:new Error('Invalid login credentials')};}}};
+ const input={action:'create',currentPassword:'test-admin-password',name:'New Staff',email:'new@example.test',phone:'+919900003333',password:'new-staff-test-password'};
+ await assert.rejects(()=>manageStaff({client,reauthClient,token:'staff-token',input}),/Only active Admin/);assert.equal(reauth,0);
+ role='admin';active=false;await assert.rejects(()=>manageStaff({client,reauthClient,token:'admin-token',input}),/Only active Admin/);
+ active=true;await assert.rejects(()=>manageStaff({client,reauthClient,token:'admin-token',input}),/Invalid login/);assert.equal(mutations,0);
+ reauthClient.auth.signInWithPassword=async()=>({data:{user:{id:'different-admin'}}});
+ await assert.rejects(()=>manageStaff({client,reauthClient,token:'admin-token',input}),/could not be verified/);assert.equal(mutations,0);
+ reauthClient.auth.signInWithPassword=async()=>({data:{user:{id:'actor'}}});
+ assert.deepEqual(await manageStaff({client,reauthClient,token:'admin-token',input}),{id:'new-roster'});assert.equal(mutations,1);
+});
+
+test('account creation cleans up unlinked Auth accounts when roster persistence fails',async()=>{
+ let removed;
+ const client={auth:{getUser:async()=>({data:{user:{id:'actor',email:'admin@example.test'}}}),admin:{createUser:async()=>({data:{user:{id:'new-auth'}}}),deleteUser:async id=>{removed=id;return {data:{}};}}},from:()=>({select:()=>({eq:()=>({maybeSingle:async()=>({data:{role:'admin',is_active:true}})})})}),rpc:async()=>({error:new Error('Phone conflicts with existing roster')})};
+ const reauthClient={auth:{signInWithPassword:async()=>({data:{user:{id:'actor'}}})}};
+ const input={action:'create',currentPassword:'test-admin-password',name:'New Staff',email:'new@example.test',phone:'+919900003333',password:'new-staff-test-password',role:'admin'};
+ await assert.rejects(()=>manageStaff({client,reauthClient,token:'admin-token',input}),/Phone conflicts/);assert.equal(removed,'new-auth');
+});
+
+test('account editing preserves the linked Auth ID and ignores client-supplied privilege fields',async()=>{
+ let updated,profile;
+ const target={id:'00000000-0000-4000-8000-000000000005',auth_user_id:'existing-auth',role:'staff',is_active:true};
+ const client={auth:{getUser:async()=>({data:{user:{id:'actor',email:'admin@example.test'}}}),admin:{updateUserById:async(id,fields)=>{updated={id,fields};return {data:{user:{id}}};}}},from:()=>({select:()=>({eq:()=>({maybeSingle:async()=>({data:{role:'admin',is_active:true}}),single:async()=>({data:target})})})}),rpc:async(name,args)=>{profile=args;return {data:{id:target.id}};}};
+ const reauthClient={auth:{signInWithPassword:async()=>({data:{user:{id:'actor'}}})}};
+ const input={action:'update',id:target.id,currentPassword:'test-admin-password',name:'Staff Renamed',email:'renamed@example.test',phone:'+919900003333',role:'admin',auth_user_id:'forged'};
+ assert.deepEqual(await manageStaff({client,reauthClient,token:'admin-token',input}),{id:target.id});
+ assert.equal(updated.id,'existing-auth');assert.equal(updated.fields.password,undefined);assert.equal(updated.fields.role,undefined);
+ assert.equal(profile.p_actor,'actor');assert.equal(profile.p_auth_user_id,'existing-auth');assert.equal(profile.p_action,'profile_updated');
 });
 
 test('request and upload RPCs return one record and never submit a forged actor',async()=>{
@@ -115,6 +144,8 @@ test('PostgreSQL enforces authorization, immutable events, clocks and attachment
   await db.exec(`
    create role anon;create role authenticated;create role service_role bypassrls;
    create schema auth;create schema storage;
+   create table auth.users(id uuid primary key,email text,phone text,encrypted_password text,role text default 'authenticated',recovery_token text default '',email_change text default '',phone_change text default '',confirmation_token text default '');
+   create table auth.audit_log_entries(id uuid primary key default gen_random_uuid(),payload jsonb);
    create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;
    create function auth.role() returns text language sql stable as $$ select current_setting('request.jwt.claim.role',true) $$;
    grant usage on schema public,auth,storage to anon,authenticated,service_role;
@@ -135,6 +166,8 @@ test('PostgreSQL enforces authorization, immutable events, clocks and attachment
   await db.exec(phoneMigration);await db.exec(phoneMigration);
   const contactMigration=await readFile(new URL('../migrations/20260930_staff_notification_email.sql',import.meta.url),'utf8');
   await db.exec(contactMigration);await db.exec(contactMigration);
+  const accountMigration=await readFile(new URL('../migrations/20261005_admin_managed_accounts.sql',import.meta.url),'utf8');
+  await db.exec(accountMigration);await db.exec(accountMigration);
   const ids={admin:'00000000-0000-4000-8000-000000000001',a:'00000000-0000-4000-8000-000000000002',b:'00000000-0000-4000-8000-000000000003',unknown:'00000000-0000-4000-8000-000000000004'};
   const rows=(await db.query(`insert into public.team_users(auth_user_id,name,phone,email,role) values
    ($1,'Owner','+919900000001','owner@example.test','admin'),
@@ -149,6 +182,42 @@ test('PostgreSQL enforces authorization, immutable events, clocks and attachment
   const q=async(sql,args=[])=> (await db.query(sql,args)).rows;
   const rejected=async(sql,args=[])=>assert.rejects(()=>db.query(sql,args));
   const create=async(type,note,assigned=null,reminder=null)=> (await q('select * from public.create_request($1,$2,null,$3,$4)',[type,note,assigned,reminder]))[0];
+  await t.test('Auth database rejects Staff password, login and recovery changes without same-transaction Admin evidence',async()=>{
+   await db.query("insert into auth.users(id,email,phone,encrypted_password) values($1,'a@example.test','919900000002','old-hash')",[ids.a]);
+   await rejected("update auth.users set encrypted_password='staff-changed' where id=$1",[ids.a]);
+   await rejected("update auth.users set email='new@example.test' where id=$1",[ids.a]);
+   await rejected("update auth.users set phone='919900000009' where id=$1",[ids.a]);
+   await rejected("update auth.users set recovery_token='reset-token' where id=$1",[ids.a]);
+   await rejected("update auth.users set email_change='new@example.test' where id=$1",[ids.a]);
+   await rejected("update auth.users set role='service_role' where id=$1",[ids.a]);
+   await rejected("update auth.users set confirmation_token='magic-link-token' where id=$1",[ids.a]);
+   let reachedAfterTokenUpdate=false;
+   await assert.rejects(()=>db.transaction(async tx=>{
+    await tx.query("update auth.users set recovery_token='cannot-send-this' where id=$1",[ids.a]);reachedAfterTokenUpdate=true;
+   }));assert.equal(reachedAfterTokenUpdate,false);
+   const audit={action:'user_modified',actor_id:'00000000-0000-0000-0000-000000000000',actor_username:'service_role',traits:{user_id:ids.a}};
+   await db.query('insert into auth.audit_log_entries(payload) values($1)',[audit]);
+   await rejected("update auth.users set encrypted_password='reuse-old-audit' where id=$1",[ids.a]);
+   await assert.rejects(()=>db.transaction(async tx=>{
+    await tx.query("update auth.users set encrypted_password='wrong-target' where id=$1",[ids.a]);
+    await tx.query('insert into auth.audit_log_entries(payload) values($1)',[{...audit,traits:{user_id:ids.b}}]);
+   }));
+   await db.transaction(async tx=>{
+    await tx.query("update auth.users set encrypted_password='admin-changed',email='a2@example.test' where id=$1",[ids.a]);
+    await tx.query('insert into auth.audit_log_entries(payload) values($1)',[audit]);
+   });
+   assert.equal((await q('select encrypted_password from auth.users where id=$1',[ids.a]))[0].encrypted_password,'admin-changed');
+   assert.equal((await q('select email from public.team_users where id=$1',[a.id]))[0].email,'a2@example.test');
+   await actor('a');await rejected('insert into auth.audit_log_entries(payload) values($1)',[audit]);
+   await rejected('select * from public.save_managed_staff($1,$2,$3,$4,$5,$6,$7,$8)',[ids.admin,ids.a,'Staff A','+919900000002','a2@example.test',null,'Team','profile_updated']);
+   await actor('', 'service_role');
+   await rejected('select * from public.save_managed_staff($1,$2,$3,$4,$5,$6,$7,$8)',[ids.a,ids.a,'Staff A','+919900000002','a2@example.test',null,'Team','profile_updated']);
+   await q('select * from public.save_managed_staff($1,$2,$3,$4,$5,$6,$7,$8)',[ids.admin,ids.a,'Staff A','+919900000002','a2@example.test',null,'Team','profile_updated']);
+   await rejected("update public.account_events set action='forged'");
+   await actor('a');assert.equal((await q('select * from public.account_events')).length,0);
+   await actor('admin');assert.equal((await q('select * from public.account_events')).length,1);
+   await db.exec('reset role');
+  });
   await t.test('only Admin adds real client projects',async()=>{
    await actor('a');await rejected('select * from public.create_project($1,$2,$3,$4)',['Client','+919900003333','Site','Kolkata']);
    await actor('admin');

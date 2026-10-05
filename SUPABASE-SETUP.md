@@ -2,7 +2,18 @@
 
 Project: https://supabase.com/dashboard/project/ochtkcazmudyhtxjnjmf
 
-The supplied public URL and publishable key are configured. On 30 September 2026, the hosted workflow tables and protected API were verified, the shared notification-email upgrade was installed, and Admin plus Rohit Ghosh and Shibani's separate Staff accounts were activated. Staff now have distinct email alias logins; their existing Auth IDs, roster IDs, phone links and history were preserved and verified. Private recovery links were generated successfully, but Staff password setup, alias inbox delivery and live notification delivery remain pending. Custom SMTP was verified disabled in Authentication → Emails → SMTP Settings. The latest signup check found public signup enabled; disable it before rollout. Phone Auth is not required for the chosen email/password login.
+The hosted workflow tables, shared notification-email upgrade, Admin and two distinct Staff accounts were previously verified. On October 5, the Admin account-management migration and manage-staff Edge Function were deployed, with database Auth audit logging enabled. Disposable hosted accounts verified Staff login, rejected self-service password/email/recovery changes, successful Auth Admin password reset, rejection of the previous password, and the endpoint's Admin role/current-password checks. Temporary accounts were removed and real employee passwords were unchanged. ACCOUNT_ALLOWED_ORIGINS allows http://localhost:8080 and https://cerulean-youtiao-fd7466.netlify.app. Staff login remains email and password. OTP, magic links and Staff password recovery are no longer offered by the app.
+
+## 0. Deploy Admin account management
+
+1. Take a database backup and test on a staging project first. Keep Supabase Auth database audit logging enabled. This custom guard uses the Auth service's `user_modified` Admin audit entry in the same database transaction; it fails closed if the entry is unavailable. It is a custom integration, not a native Supabase setting. Reverify it after Auth upgrades.
+2. In Supabase SQL Editor, run `migrations/20261005_admin_managed_accounts.sql` after the existing secure and notification-email migrations. This adds the Staff credential guard, login synchronization and an immutable account-action trail. It preserves all account IDs and passwords.
+3. Configure the Edge Function secret `ACCOUNT_ALLOWED_ORIGINS` with the exact deployment origin and, for local testing, `http://localhost:8080`, separated by commas. No wildcard origins. Standard SUPABASE_URL, SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY are supplied by hosted Edge Functions and must never be copied into frontend files.
+4. From an operator's authenticated Supabase CLI session, deploy both files under `supabase/functions/manage-staff` with `supabase functions deploy manage-staff --project-ref ochtkcazmudyhtxjnjmf --no-verify-jwt`. The function explicitly verifies the incoming user token against Auth, requires an active Admin roster entry, then checks the Admin's current password using a separate Auth client. The browser's role selection and user metadata do not authorize access.
+5. Rebuild/redeploy the frontend with `npm run build`; publish `dist` only. Admin opens Staff directory → Manage account to set passwords directly, or Create staff login to add Staff. Staff never receive a setup link. Login email is the unique username; notification email may be shared.
+6. Use a disposable account on staging to test password login, Staff API password/email/phone/recovery rejection, Admin API reset success, identity preservation and deactivation. Retest on hosted Auth before calling the server restriction enabled. Existing recovery links cannot change a Staff password once the guard is installed. Old issued JWTs may remain valid until expiry; inactive roster checks immediately deny data access.
+
+Do not disable the guard to make a failing reset pass. Check that Auth database audit logging is enabled and that the installed Auth version still writes the documented Admin event. Rollback, if necessary, is to drop `admin_managed_staff_credentials` on auth.users; this restores Staff self-service and must not be presented as restricted access. See `PROTOTYPE-TESTING.md` for acceptance checks.
 
 ## 1. Database
 
@@ -27,25 +38,25 @@ RLS must be true for every workflow table. Bucket public must be false. Anonymou
 Under **Authentication → Sign In / Providers**:
 
 - Disable public signup; provision accounts through the administrator.
-- Keep email/password enabled for both Admin and Staff sign-in and password recovery.
+- Keep email/password enabled for Admin and Staff sign-in; disable public signup and external providers. Keep Phone Auth disabled.
 - Phone Auth and Twilio are not required. The current login screen has no SMS flow.
 - Set minimum password length to 12, appropriate Auth rate limits, and CAPTCHA. Configure the Turnstile secret in Supabase and its public site key through PUBLIC_TURNSTILE_SITE_KEY.
-- Enable and configure custom SMTP under **Authentication → Emails → SMTP Settings** for Admin and Staff password setup/recovery. The custom SMTP switch is currently off; Supabase's default sender has restrictions. Verify delivery to both Staff aliases before relying on email recovery.
+- Password creation/resets use the Admin screen and do not require SMTP. An operator can use the trusted Supabase Admin API or dashboard if the only Admin loses access.
 
-Under **URL Configuration**, set the real HTTPS application URL and allow its exact password setup redirect, e.g. `https://YOUR-HOST/?setup=1`. Local testing uses `http://localhost:8080/?setup=1`. Avoid broad production wildcard redirects.
+Under **URL Configuration**, set the real HTTPS application URL. The app does not use password setup redirects or magic links. Avoid broad production wildcard redirects.
 
 ## 3. Admin and Staff accounts
 
-Aditya Nahata's Admin account is active and linked to `aditya@oakgallerie.com`. After signing in, Admin and Staff can use the app's **Change password** button to enter their current password and set a new one without sending an email. A user who does not know the current password must use the recovery flow. The registered Staff logins are:
+Aditya Nahata's Admin account is linked to `aditya@oakgallerie.com`. Only Admin sees **Change password** for their own account. Admin creates/edits Staff passwords and login details from Staff directory. Staff who forget their password must contact Admin. The registered Staff logins are:
 
 | Staff member | Login email | Notification email |
 |---|---|---|
 | Rohit Ghosh | info+rohit@oakgallerie.com | info@oakgallerie.com |
 | Shibani | info+shibani@oakgallerie.com | info@oakgallerie.com |
 
-The domain's MX records point to Google, and Google Workspace supports plus-address variations. Delivery of these aliases into the info inbox has not yet been tested. The two Staff accounts retain their previous IDs, phone numbers and history. No Staff password has been set and no setup email or SMS has been sent. Do not share passwords or recovery links.
+The two Staff accounts retain their IDs, phone numbers and history. The aliases are login identifiers; notification delivery uses the configured notification address. Admin assigns passwords through Manage account. Existing private recovery-link files are obsolete and are never deployed.
 
-Both aliases are intended to deliver into the shared mailbox. Anyone who can read that mailbox can use password recovery for either Staff account. Separate accounts keep actions attributed to the account in use, but do not establish strong individual identity assurance against other shared-mailbox readers. Individually controlled recovery mailboxes are needed for that assurance.
+After the credential guard is installed and verified, Staff recovery-token issuance and password changes are denied even when attempted through the Auth API. Before installing it, the old Supabase self-service behavior remains active.
 
 Create a private copy of `staff-roster.example.csv`. Replace every placeholder with real names and verified E.164 phone numbers. Columns: name, phone_e164, email, auth_email, role, department, active. For Staff, email is the optional notification address, which may be shared; auth_email is the distinct login/recovery email. For Admin, email remains the login/recovery address and auth_email must be blank or identical. The importer rejects duplicate login emails and never infers a Staff login from the notification address. Only admin/staff roles are accepted, and an active Admin must remain. The private local roster already includes the two aliases above, department Team.
 
@@ -69,25 +80,11 @@ Create/link accounts idempotently, without messages:
 npm run import:staff -- staff-roster.csv
 ```
 
-To prepare Staff password setup locally without sending email, allow the exact local setup redirect in Supabase, start the app, then run:
-
-```powershell
-npm run setup:staff-passwords -- staff-roster.csv --app-url http://localhost:8080/
-```
-
-This verifies the registered Staff identities and generates recovery links in a private `backups/*.secret` file. Links for both registered Staff were generated successfully with the verified redirect `http://localhost:8080/?setup=1`. The links are credentials: open the appropriate link locally for password setup, keep the file off public hosting and do not paste its contents into chat. It sends no email and does not set a password. Use the deployed HTTPS URL instead of localhost for production setup.
-
-When recipients, SMTP and redirect URL are ready and sending is explicitly authorized, request setup emails:
-
-```powershell
-npm run import:staff -- staff-roster.csv --send-password-links
-```
-
-New accounts with a login email receive an unpredictable initial password generated on the server, never printed or saved. The account holder chooses a password through a recovery/setup link. Updating an existing account preserves its current password and identity; adding an alias to a formerly phone-only account does not automatically set a usable password. The optional send-password-links flag requests recovery email for every active imported account with a login email, including Staff, and sends no SMS.
+The bulk importer is an operator tool for roster maintenance. New imported accounts get an unpredictable initial password that is never printed or stored; Admin must then set their usable password in Manage account. Existing accounts keep their password. Password-link generation and `--send-password-links` have been removed. For routine new staff, use Admin → Create staff login so Admin chooses the initial password directly.
 
 Staff chooses **Staff**, enters their alias and individual password. Admin chooses **Admin**, enters their registered email and password. Staff imports link by phone or the explicit auth_email, never by the notification email; conflicting identities are rejected. For legacy provisioning the importer still accepts Staff without auth_email, preserving phone-only identities, but those accounts cannot use the current email/password screen until a login email and password are configured.
 
-Admin can deactivate staff after reassigning open work. RLS immediately denies data to existing tokens and push subscriptions are revoked. Import active=false to additionally ban the Auth account.
+Admin can deactivate Staff after reassigning open work. The account-management endpoint removes roster access, revokes push subscriptions/cancels queued notifications, then bans the Auth account. If the provider call fails, database access stays blocked; retry the access action to synchronize the ban. Account-action events contain the actor, target and action, never a password.
 
 ## 4. Start and verify
 
@@ -106,7 +103,7 @@ Deploy only `dist`. Netlify builds with `npm run build`. Public deployment varia
 
 The database outbox is connected. Actual push/email delivery requires deployment and configuration of the existing notification-worker, notification-scan and resend-webhook Edge Functions using `supabase/config.toml`.
 
-Staff receives email fallback at notification_email when configured. Notification messages do not sign anyone in or acknowledge requests; the named recipient must authenticate to acknowledge an urgent message. The shared recovery mailbox limitation described above still applies. If neither notification_email nor an Auth email is available, missing fallback appears as a failed email-channel attempt without calling Resend. A successful push remains provider acceptance. There is no workflow SMS notification channel.
+Staff receives email fallback at notification_email when configured. Notification messages do not sign anyone in or acknowledge requests; the named recipient must authenticate to acknowledge an urgent message. If neither notification_email nor an Auth email is available, missing fallback appears as a failed email-channel attempt without calling Resend. A successful push remains provider acceptance. There is no workflow SMS notification channel.
 
 Set server secrets VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT, RESEND_API_KEY, RESEND_FROM_EMAIL, RESEND_WEBHOOK_SECRET and APP_URL. Verify the Resend sender domain. Set PUBLIC_VAPID_KEY in the frontend. Auth SMTP and workflow notification email are separate configurations.
 
