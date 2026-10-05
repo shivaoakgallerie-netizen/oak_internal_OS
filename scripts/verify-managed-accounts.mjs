@@ -13,6 +13,18 @@ if(url!=='https://ochtkcazmudyhtxjnjmf.supabase.co'||!key)throw Error('Expected 
 const options={auth:{persistSession:false,autoRefreshToken:false}},server=createClient(url,key,options);
 const publicClient=()=>createClient(url,config.window.OAK_CONFIG.publishableKey,options);
 const checked=result=>{if(result.error)throw result.error;return result.data;};
+if(process.argv.includes('--check-endpoint')){
+ const endpoint=url+'/functions/v1/manage-staff';
+ for(const origin of ['http://localhost:8080','https://cerulean-youtiao-fd7466.netlify.app']){
+  const response=await fetch(endpoint,{method:'OPTIONS',headers:{origin,'access-control-request-method':'POST','access-control-request-headers':'authorization,apikey,content-type'}});
+  assert.equal(response.status,204);assert.equal(response.headers.get('access-control-allow-origin'),origin);
+  console.log('PASS: Browser preflight allowed for '+origin);
+ }
+ assert.equal((await fetch(endpoint,{method:'OPTIONS',headers:{origin:'https://unapproved.example'}})).status,403);
+ assert.equal((await fetch(endpoint,{method:'POST',headers:{'content-type':'application/json'},body:'{}'})).status,401);
+ console.log('PASS: Unapproved origins and unauthenticated calls rejected.');
+ process.exit(0);
+}
 const password=()=>randomBytes(24).toString('base64url');
 const stamp=Date.now(),fixtures=[],sessions=[];
 let staff,admin,staffPassword=password(),adminPassword=password();
@@ -43,6 +55,7 @@ try{
  const denied=async(label,action)=>{const result=await action();assert(result.error,label+' must be rejected');console.log('PASS: '+label+' rejected.');};
  await denied('Staff password update',()=>staffClient.auth.updateUser({password:password(),current_password:staffPassword}));
  await denied('Staff email update',()=>staffClient.auth.updateUser({email:'changed-'+staff.email}));
+ await denied('Staff phone update',()=>staffClient.auth.updateUser({phone:'+12025550196'}));
  await denied('Staff password recovery',()=>staffClient.auth.resetPasswordForEmail(staff.email));
  await denied('Staff account-management call',()=>staffClient.functions.invoke('manage-staff',{body:{action:'create',currentPassword:staffPassword}}));
  const newPassword=password();checked(await server.auth.admin.updateUserById(staff.user.id,{password:newPassword}));
