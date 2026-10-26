@@ -1,7 +1,7 @@
-const CACHE = 'oak-shell-secure-v21';
+const CACHE = 'oak-shell-secure-v22';
 const SHELL = [
   './', './index.html', './styles.css', './prototype.css', './mobile.css?v=company-logo-1', './app.js', './team-chat.js',
-  './workflow-rules.js', './live-client.js', './legacy-cleanup.js', './config.js', './vendor/supabase.js', './icons/logo.png', './icons/symbol.png', './manifest.webmanifest', './icons/oak-mark.svg'
+  './workflow-rules.js', './live-client.js', './legacy-cleanup.js', './config.js', './vendor/supabase.js', './icons/logo.png', './icons/symbol.png', './icons/app-icon-192.png', './icons/app-icon-512.png', './manifest.webmanifest', './icons/oak-mark.svg'
 ];
 const shellUrls = new Set(SHELL.map(path => new URL(path, self.registration.scope).href));
 const indexUrl = new URL('./index.html', self.registration.scope).href;
@@ -47,7 +47,7 @@ self.addEventListener('fetch', event => {
 self.addEventListener('push',event=>{
  let data;try{data=event.data?.json()||{};}catch{data={};}
  // The lock-screen message contains no confidential request notes.
- event.waitUntil(self.registration.showNotification('Oak Gallerie',{body:'You have a workflow notification. Sign in to view it.',icon:'icons/oak-mark.svg',tag:typeof data.tag==='string'?data.tag:'oak-work',data:{url:data.url}}));
+ event.waitUntil(self.registration.showNotification('Oak Gallerie',{body:'You have a workflow notification. Sign in to view it.',icon:'icons/app-icon-192.png',tag:typeof data.tag==='string'?data.tag:'oak-work',data:{url:data.url}}));
 });
 self.addEventListener('notificationclick',event=>{
  event.notification.close();
