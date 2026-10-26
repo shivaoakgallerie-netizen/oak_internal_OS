@@ -1,7 +1,7 @@
 // Presentation rules only. Every mutation and read is authorized again in Postgres.
-export const TYPE_LABEL = Object.freeze({service:'Service',help_ticket:'Help ticket',follow_up:'Follow-up',urgent_message:'Urgent message'});
-export const ROLE_LABEL = Object.freeze({admin:'Admin / Owner',staff:'Staff Member'});
-export const ROLE_DESCRIPTION = Object.freeze({admin:'Manage requests, assignments, staff access, reports and delivery health.',staff:'Create Service, Help and personal Follow-up requests. Update assigned work and acknowledge urgent messages addressed to you.'});
+export const TYPE_LABEL = Object.freeze({service:'Client work',help_ticket:'Ask for help',follow_up:'Personal reminder',urgent_message:'Urgent message'});
+export const ROLE_LABEL = Object.freeze({admin:'Admin',staff:'Team member'});
+export const ROLE_DESCRIPTION = Object.freeze({admin:'Keep team requests moving and help everyone stay up to date.',staff:'Create requests, share progress on assigned work, and talk with your team.'});
 const active = user => Boolean(user?.is_active && ROLE_LABEL[user.role]);
 export const canManage = user => active(user) && user.role === 'admin';
 export const allowedTypes = user => !active(user) ? [] : canManage(user) ? Object.keys(TYPE_LABEL) : ['service','help_ticket','follow_up'];
@@ -11,6 +11,30 @@ export const canAssign = (user,ticket) => canManage(user) && Boolean(ticket) && 
 export const canAttach = (user,ticket) => canView(user,ticket) && ticket.status !== 'Resolved' && (canManage(user) || ticket.assignee_id === user.id || ticket.created_by === user.auth_user_id);
 export const canAcknowledge = (user,ticket) => active(user) && ticket?.type === 'urgent_message' && ticket.status !== 'Resolved' && ticket.assignee_id === user.id && !ticket.urgent_acknowledged_at;
 export const recipients = (state,type) => type === 'follow_up' ? [] : state.team.filter(active);
+const CANCELLATION_REASON = Object.freeze({
+  request_resolved: 'The request was marked Done.',
+  request_updated: 'A new update was saved, so the old reminder was no longer needed.',
+  assignment_changed: 'The request was assigned to someone else, so this reminder was stopped.',
+  recipient_inactive: 'This person’s account is inactive, so the message was not sent.',
+  urgent_acknowledged: 'This person confirmed they saw the urgent message.'
+});
+export function notificationCancellationText(notification) {
+  if(notification.state!=='cancelled')return '';
+  const reason=Object.hasOwn(CANCELLATION_REASON,notification.cancellation_reason)
+    ?CANCELLATION_REASON[notification.cancellation_reason]:'The cancellation reason was not recorded.';
+  return reason+' This notification will not be sent.';
+}
+export const isNotificationRetryScheduled = notification => notification.state==='failed'
+  && !notification.processed_at && notification.attempt_count>0 && notification.attempt_count<4
+  && Boolean(notification.next_attempt_at);
+export function notificationTimingText(notification,format) {
+  if(notification.state==='queued'&&notification.last_error==='Waiting for the recipient to enable browser alerts.')return 'Waiting for this person to enable alerts on their device.';
+  const next=notification.next_attempt_at||notification.scheduled_for;
+  if(notification.state==='queued'&&next)return 'Scheduled for: '+format(next);
+  if(isNotificationRetryScheduled(notification))
+    return 'Next retry: '+format(next)+' · Delivery attempts: '+notification.attempt_count;
+  return '';
+}
 export function normalizePhone(value) {
   const phone=String(value||'').trim().replace(/[\s()-]/g,'');
   if (/^[6-9]\d{9}$/.test(phone)) return '+91'+phone;

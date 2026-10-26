@@ -1,5 +1,6 @@
-import {createClient,SupabaseClient} from 'npm:@supabase/supabase-js@2';
+import {createClient,SupabaseClient} from 'npm:@supabase/supabase-js@2.117.2';
 import {json,requireServiceRole} from '../_shared/response.ts';
+import {safeProviderError} from '../_shared/provider.js';
 
 Deno.serve(async request=>{
   const startedAt=new Date().toISOString();let client:SupabaseClient|undefined;
@@ -11,5 +12,5 @@ Deno.serve(async request=>{
     await client.from('worker_runs').insert({worker:'notification-scan',status:'succeeded',processed_count:data||0,started_at:startedAt});
     await client.from('worker_runs').delete().lt('finished_at',new Date(Date.now()-30*86400000).toISOString());
     return json({queued:data,scannedAt:new Date().toISOString()});
-  }catch(error){if(client)await client.from('worker_runs').insert({worker:'notification-scan',status:'failed',error_message:error instanceof Error?error.message:String(error),started_at:startedAt});return json({error:error instanceof Error?error.message:String(error)},error instanceof Error&&error.message==='Unauthorized'?401:500)}
+  }catch(error){const unauthorized=error instanceof Error&&error.message==='Unauthorized';if(client)try{await client.from('worker_runs').insert({worker:'notification-scan',status:'failed',error_message:safeProviderError(error),started_at:startedAt});}catch{}return json({error:unauthorized?'Unauthorized':'Notification scan failed'},unauthorized?401:500)}
 });

@@ -1,14 +1,18 @@
-import { TYPE_LABEL, ROLE_LABEL, ROLE_DESCRIPTION, allowedTypes, canManage, canView, canUpdate, canAssign, canAcknowledge, canAttach, recipients, normalizePhone } from './workflow-rules.js';
+import { TYPE_LABEL, ROLE_LABEL, ROLE_DESCRIPTION, allowedTypes, canManage, canView, canUpdate, canAssign, canAcknowledge, canAttach, recipients, normalizePhone, notificationCancellationText, notificationTimingText, isNotificationRetryScheduled } from './workflow-rules.js';
 import { LiveRepository } from './live-client.js';
 import { scrubLegacyCredentials } from './legacy-cleanup.js';
+import { TeamChat } from './team-chat.js';
 
 const $ = id => document.getElementById(id);
 const esc = value => String(value ?? '').replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
 const fmt = value => value ? new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Calcutta' }).format(new Date(value)) : '—';
 const initials = name => name.split(' ').map(part => part[0]).join('').slice(0, 2);
-const EVENT_LABEL = { created: 'Request created', assigned: 'Assignment changed', status_updated: 'Workflow updated', resolved: 'Resolved', reopened: 'Reopened', reminder_due: 'Personal reminder due', reminder_cancelled: 'Personal reminder cancelled', overdue: '24-hour update overdue', urgent_repeat: 'Urgent reminder repeated', notification_queued: 'Notification queued', notification_sent: 'Provider accepted notification', notification_failed: 'Delivery failed', notification_cancelled: 'Notification cancelled', notification_retried: 'Delivery retried', read: 'Request opened', acknowledged: 'Urgent message acknowledged', attachment_added: 'Attachment added' };
-const KIND_LABEL = { assigned: 'New assigned work', urgent: 'Urgent message', urgent_retry: 'Urgent acknowledgement reminder', overdue: '24-hour update reminder', follow_up_due: 'Personal follow-up reminder' };
-let repository, workspace = {clients:[],team:[],projects:[],tickets:[],events:[],attachments:[],notifications:[],deliveries:[]};
+const STATUS_LABEL = Object.freeze({New:'New','In Review':'In progress',Scheduled:'Planned',Resolved:'Done'});
+const displayStatus = status => STATUS_LABEL[status] || status;
+const deliveryStateLabel = state => ({queued:'Waiting to send',retrying:'Trying again',sent:'Sent',failed:'Needs attention',cancelled:'Not sent'})[state] || state;
+const EVENT_LABEL = { created: 'Request added', assigned: 'Person assigned', status_updated: 'Progress updated', resolved: 'Marked done', reopened: 'Reopened', reminder_due: 'Personal reminder due', reminder_cancelled: 'Personal reminder stopped', overdue: 'Update needed', urgent_repeat: 'Urgent reminder repeated', notification_queued: 'Message waiting to send', notification_sent: 'Message sent', notification_failed: 'Message could not be sent', notification_cancelled: 'Message not sent', notification_retried: 'Message tried again', read: 'Request opened', acknowledged: 'Urgent message confirmed', attachment_added: 'Photo or video added' };
+const KIND_LABEL = { assigned: 'Work assigned to you', urgent: 'Urgent message for you', urgent_retry: 'Please confirm urgent message', overdue: 'Request needs an update', follow_up_due: 'Your reminder is due' };
+let repository, chat, workspace = {clients:[],team:[],projects:[],tickets:[],events:[],attachments:[],notifications:[],deliveries:[]};
 let currentUser=null,currentTicketId=null,currentView='requests',busy=false,connected=false,authGeneration=0,captchaWidget;
 let mediaURLs=[],previewURLs=[],mediaVersion=0;
 let loginMode='staff';
@@ -31,22 +35,28 @@ function revokeURLs(list) { for (const url of list) URL.revokeObjectURL(url); li
 function closeDetail() { if ($('ticketDialog').open) $('ticketDialog').close(); currentTicketId=null; mediaVersion++; revokeURLs(mediaURLs); if(location.hash.startsWith('#request='))history.replaceState(null,'',location.pathname+location.search); }
 function reportError(error) { toast(error.message||'Unable to complete this action.',true); }
 function clearWorkspace() {
+  chat?.stop();
   authGeneration++;currentUser=null;connected=false;workspace={clients:[],team:[],projects:[],tickets:[],events:[],attachments:[],notifications:[],deliveries:[]};
   closeDetail();for(const dialog of document.querySelectorAll('dialog[open]'))dialog.close();revokeURLs(previewURLs);
-  for(const id of ['ticketList','inboxList','staffList','reportSummary','typeReport','workloadReport','resolvedReport','deliveryList','deliverySummary','detailTimeline','detailDelivery','detailMedia'])$(id).replaceChildren();
+  for(const id of ['projectList','ticketList','inboxList','staffList','reportSummary','typeReport','workloadReport','resolvedReport','deliveryList','deliverySummary','detailTimeline','detailDelivery','detailMedia'])$(id).replaceChildren();
   $('staffAccountForm').reset();$('changePasswordForm').reset();accountId=null;
   show('workspace',false);show('login',true);$('loginForm').reset();setLoginMode(loginMode);
 }
 function setLoginMode(mode) {
-  loginMode=mode;$('loginPassword').value='';
-  $('loginTitle').textContent=mode==='staff'?'Staff sign in':'Admin sign in';
-  $('loginHint').textContent=mode==='staff'?'Use your own registered email or staff email alias and password.':'Use your registered administrator email and password.';
-  $('loginPhone').placeholder=mode==='staff'?'Your staff email alias':'Admin email';
+  loginMode=mode;$('loginPassword').value='';setLoginPasswordVisible(false);
+  $('loginTitle').textContent=mode==='staff'?'Team member sign in':'Admin sign in';
+  $('loginHint').textContent=mode==='staff'?'Use your work email and password.':'Use your Admin email and password.';
+  $('loginPhone').placeholder=mode==='staff'?'Your work email':'Admin email';
   show('loginModes',true);show('loginForm',true);
   show('loginError',false);
   for(const [id,selected] of [['staffLoginMode',mode==='staff'],['adminLoginMode',mode==='admin']]){
     $(id).classList.toggle('primary',selected);$(id).setAttribute('aria-pressed',String(selected));
   }
+}
+function setLoginPasswordVisible(visible) {
+  $('loginPassword').type=visible?'text':'password';
+  $('loginPasswordToggle').setAttribute('aria-pressed',String(visible));
+  $('loginPasswordToggle').setAttribute('aria-label',visible?'Hide password':'Show password');
 }
 async function refresh() {
   const generation=authGeneration;
@@ -66,8 +76,8 @@ async function change(action) {
 }
 async function run(button,action) {
   if(busy)return;
-  busy=true;const original=button?.textContent;if(button){button.disabled=true;button.textContent='Please wait…';}
-  try {await action();}catch(error){reportError(error);}finally{busy=false;if(button){button.disabled=false;button.textContent=original;}}
+  busy=true;const original=button?.innerHTML;if(button){button.disabled=true;button.textContent='Please wait…';}
+  try {await action();}catch(error){reportError(error);}finally{busy=false;if(button){button.disabled=false;button.innerHTML=original;}}
 }
 function captchaToken(widget=captchaWidget) {return widget===undefined?undefined:globalThis.turnstile?.getResponse(widget);}
 function resetCaptcha(widget=captchaWidget) {if(widget!==undefined)globalThis.turnstile?.reset(widget);}
@@ -99,26 +109,33 @@ async function logout() {
   if(subscription&&repository&&currentUser)await repository.rpc('revoke_push_subscription',{p_endpoint:subscription.endpoint}).catch(()=>{});
   clearWorkspace();if(repository)await repository.logout().catch(reportError);
 }
-function viewAllowed(view) { return Boolean(currentUser?.is_active) && (view === 'requests' || view === 'inbox' || view === 'staff' && currentUser.role === 'admin' || ['reports', 'deliveries'].includes(view) && canManage(currentUser)) }
+function viewAllowed(view) { return Boolean(currentUser?.is_active) && (['requests','projects','inbox','chat'].includes(view) || view === 'staff' && currentUser.role === 'admin' || ['reports', 'deliveries'].includes(view) && canManage(currentUser)) }
 function switchView(view) {
   if (!viewAllowed(view)) { toast('This page is not available for your role.', true); return }
   currentView = view;
-  for (const name of ['requests', 'inbox', 'staff', 'reports', 'deliveries']) show(name + 'View', view === name);
+  $('workspace').dataset.screen=view;
+  document.querySelector('.account-menu').open=false;
+  for (const name of ['requests', 'projects', 'inbox', 'chat', 'staff', 'reports', 'deliveries']) show(name + 'View', view === name);
   document.querySelectorAll('[data-view]').forEach(button => { button.classList.toggle('active', button.dataset.view === view); button.setAttribute('aria-current', button.dataset.view === view ? 'page' : 'false') });
-  const titles = { requests: canManage(currentUser) ? 'Team requests' : 'My workspace', inbox: 'My reminders', staff: 'People behind the details', reports: 'A clear view of the work', deliveries: 'Delivery health' };
-  const descriptions = { requests: canManage(currentUser) ? 'Assign the right person. Keep every commitment visible.' : 'Your assigned work, your requests, and the shared queue for your team.', inbox: 'Your assigned work, personal reminders and urgent messages.', staff: 'Registered people, access and current workload.', reports: 'Current totals from your Supabase workspace.', deliveries: 'Trace provider acceptance, failures and retries.' };
+  const titles = { requests: 'Hello, '+currentUser.name.split(' ')[0], projects: 'Projects', inbox: 'Alerts', chat:'Team chat', staff: 'Team members', reports: 'Team overview', deliveries: 'Message delivery' };
+  const descriptions = { requests: 'Here’s what needs your attention.', projects: 'All your project work, together.', inbox: 'Reminders and important messages sent to you.', chat:'One shared conversation for everyone at Oak Gallerie.', staff: 'People who can sign in and help with requests.', reports: 'A quick look at open and completed work.', deliveries: 'Check whether important messages were sent.' };
+  $('pageIcon').querySelector('use').setAttribute('href','#icon-'+({requests:'clipboard',projects:'folder',inbox:'clock',chat:'chat',staff:'people',reports:'chart',deliveries:'truck'}[view]));
   $('pageTitle').textContent = titles[view]; $('pageDescription').textContent = descriptions[view]; show('newTicketBtn', view === 'requests');
   renderAll();
 }
 function renderAll() {
   if (!currentUser) return;
+  chat?.setUser(currentUser);chat?.setVisible(currentView==='chat');
   $('userName').textContent = currentUser.name; $('userRole').textContent = ROLE_LABEL[currentUser.role]; $('workspaceEyebrow').textContent = currentUser.department;
   $('roleGuidance').textContent = ROLE_DESCRIPTION[currentUser.role];
-  $('demoTime').textContent = fmt(Date.now()); $('storageStatus').textContent = connected ? 'Connected to Supabase' : 'Connection unavailable';
+  $('workspace').dataset.screen=currentView;
+  $('demoTime').textContent = fmt(Date.now()); $('storageStatus').textContent = connected ? 'All changes saved' : 'Connection problem — ask your Admin';
   document.querySelectorAll('[data-view]').forEach(button => button.classList.toggle('hidden', !viewAllowed(button.dataset.view)));
-  show('newProjectBtn',canManage(currentUser));
+  show('chatClearBtn',canManage(currentUser)&&currentView==='chat');
+  show('newProjectBtn',canManage(currentUser)&&currentView==='projects');
   show('changePasswordBtn',canManage(currentUser));
-  $('scopeFilter').options[0].textContent = canManage(currentUser) ? 'All team requests' : 'My workspace';
+  $('scopeFilter').options[0].textContent = canManage(currentUser) ? 'All team work' : 'My work';
+  renderProjects();
   renderTickets(); renderInbox(); if (currentUser.role === 'admin') renderStaff(); else $('staffList').innerHTML = '';
   if (canManage(currentUser)) { renderReports(); renderDeliveries() } else for (const id of ['reportSummary', 'typeReport', 'workloadReport', 'resolvedReport', 'deliverySummary', 'deliveryList']) $(id).innerHTML = '';
 }
@@ -129,15 +146,49 @@ function filteredTickets() {
     return (!query || hay.includes(query)) && (!type || t.type === type) && (!project || t.project_id === project) && (status === 'all' || (status ? t.status === status : t.status !== 'Resolved')) && (scope === 'relevant' || scope === 'assigned' && t.assignee_id === currentUser.id || scope === 'created' && t.created_by === currentUser.auth_user_id || scope === 'shared' && !t.assignee_id);
   }).sort((a, b) => { const rank = t => isUrgent(t) ? 0 : isDue(t) ? 1 : isReminderDue(t) ? 2 : t.status === 'Resolved' ? 4 : 3; return rank(a) - rank(b) || Date.parse(a.created_at) - Date.parse(b.created_at) });
 }
-function renderTickets() {
-  const tickets = filteredTickets();
-  $('ticketList').innerHTML = tickets.length ? tickets.map(t => '<button class="ticket ' + (isUrgent(t) ? 'critical' : isDue(t) ? 'overdue' : '') + '" data-request="' + esc(t.id) + '"><span class="ticket-main"><h3>' + esc(TYPE_LABEL[t.type]) + (t.project_id ? ' · ' + esc(projectName(t.project_id)) : '') + '</h3><span class="ticket-description">' + esc(t.note) + '</span><span class="meta"><span>' + esc(t.assignee_id ? 'Assigned: ' + userById(t.assignee_id)?.name : 'Shared queue · awaiting assignment') + '</span><span>Created by ' + esc(actorName(t.created_by)) + '</span></span></span><span class="ticket-flags">' + badge(t.status, t.status === 'Resolved' ? 'resolved' : '') + (isUrgent(t) ? badge('Acknowledgement due', 'urgent') : isDue(t) ? badge('24h update overdue', 'due') : isReminderDue(t) ? badge('Personal reminder due', 'due') : '') + '</span></button>').join('') : '<div class="empty">No requests match this view.</div>';
-  const relevant = visibleTickets(); $('urgentCount').textContent = relevant.filter(isUrgent).length; $('dueCount').textContent = relevant.filter(isDue).length; $('openCount').textContent = relevant.filter(t => t.status !== 'Resolved').length;
+const REQUEST_ICON = Object.freeze({service:'service',help_ticket:'help',follow_up:'clock',urgent_message:'bell'});
+function requestTiming(ticket) {
+  if(ticket.status==='Resolved')return ticket.resolved_at?'Done '+fmt(ticket.resolved_at):'Done';
+  if(ticket.type==='urgent_message')return 'Waiting for confirmation';
+  if(ticket.type==='follow_up')return (isReminderDue(ticket)?'Reminder due ':'Reminder set for ')+fmt(ticket.reminder_at);
+  return ticket.next_followup_due_at?(isDue(ticket)?'Update overdue since ':'Next update due ')+fmt(ticket.next_followup_due_at):'';
 }
+function renderTickets() {
+  const tickets=filteredTickets(),relevant=visibleTickets();
+  document.querySelectorAll('[data-queue]').forEach(button=>{const selected=button.dataset.queue===($('statusFilter').value==='Resolved'?'done':$('scopeFilter').value==='assigned'?'mine':$('scopeFilter').value==='relevant'?'team':'');button.classList.toggle('active',selected);button.setAttribute('aria-pressed',String(selected));});
+  $('ticketList').innerHTML=tickets.length?tickets.map(t=>{
+    const priority=isUrgent(t)?'critical':isDue(t)?'overdue':'';
+    const icon=REQUEST_ICON[t.type]||'clipboard';
+    const assignee=t.assignee_id?'With '+(userById(t.assignee_id)?.name||'a team member'):'Waiting for someone to take this';
+    return '<button class="ticket '+priority+'" data-request="'+esc(t.id)+'"><span class="ticket-main"><span class="ticket-heading"><span class="ticket-type-icon" aria-hidden="true"><svg class="ui-icon" focusable="false"><use href="#icon-'+icon+'"/></svg></span><span class="ticket-title-group"><span class="ticket-type">'+esc(TYPE_LABEL[t.type]||t.type)+'</span>'+(t.project_id?'<span class="ticket-project">'+esc(projectName(t.project_id))+'</span>':'')+'</span></span><span class="ticket-description">'+esc(t.note)+'</span><span class="meta"><span>'+esc(assignee)+'</span><span>Added by '+esc(actorName(t.created_by))+'</span></span></span><span class="ticket-flags">'+badge(displayStatus(t.status),t.status==='Resolved'?'resolved':'')+(priority?badge(isUrgent(t)?'Needs confirmation':'Update needed',isUrgent(t)?'urgent':'due'):'')+'<span class="ticket-timing">'+esc(requestTiming(t))+'</span></span></button>';
+  }).join(''):(()=>{
+    const noRequests=!relevant.length;
+    const allResolved=!noRequests&&relevant.every(t=>t.status==='Resolved')&&$('statusFilter').value==='';
+    const title=noRequests?'Nothing here yet':allResolved?'You’re all caught up':'No matching requests';
+    const detail=noRequests?'Start with a request. Add a short note and choose who should handle it.':allResolved?'Everything is done. You can still view completed requests.':'Try another search or change the filters to see more requests.';
+    const action=noRequests?'Create a request':allResolved?'View completed work':'Clear filters';
+    const kind=noRequests?'create':allResolved?'all':'clear';
+    return '<div class="request-empty"><span class="request-empty-icon" aria-hidden="true"><svg class="ui-icon" focusable="false"><use href="#icon-'+(allResolved?'check':'clipboard')+'"/></svg></span><strong>'+title+'</strong><p>'+detail+'</p><button type="button" class="btn" data-empty-action="'+kind+'">'+action+'</button></div>';
+  })();
+  $('urgentCount').textContent=relevant.filter(isUrgent).length;
+  $('dueCount').textContent=relevant.filter(isDue).length;
+  $('openCount').textContent=relevant.filter(t=>t.status!=='Resolved').length;
+}
+
+function renderProjects() {
+  const query=$('projectSearch').value.trim().toLowerCase();
+  const projects=state().projects.filter(p=>[p.name,p.site_address,state().clients.find(c=>c.id===p.client_id)?.name].join(' ').toLowerCase().includes(query));
+  $('projectList').innerHTML=projects.map(p=>{
+    const client=state().clients.find(c=>c.id===p.client_id);
+    const open=visibleTickets().filter(t=>t.project_id===p.id&&t.status!=='Resolved').length;
+    return '<button class="project-card" data-project="'+esc(p.id)+'"><span class="project-symbol"><svg class="ui-icon" aria-hidden="true"><use href="#icon-folder"/></svg></span><span class="project-details"><strong>'+esc(p.name)+'</strong><span>'+esc([client?.name,p.site_address].filter(Boolean).join(' · ')||'Project workspace')+'</span>'+badge(open+' open')+'</span><span class="project-chevron" aria-hidden="true">›</span></button>';
+  }).join('')||'<div class="card empty">'+(query?'No matching projects.':'No projects yet. Your Admin can add the first project.')+'</div>';
+}
+
 function renderInbox() {
   const list = state().notifications.filter(n => n.recipient_id === currentUser.id && canView(currentUser, ticketById(n.ticket_id))).sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
   $('inboxCount').textContent = list.filter(n => n.state !== 'cancelled' && ticketById(n.ticket_id)?.status !== 'Resolved').length || '';
-  $('inboxList').innerHTML = list.length ? list.map(n => '<button class="notification-card" data-request="' + esc(n.ticket_id) + '"><span class="eyebrow">' + esc(KIND_LABEL[n.kind] || n.kind) + '</span><strong>' + esc(ticketById(n.ticket_id)?.note) + '</strong><span class="meta">' + badge(n.state, ['failed', 'retrying'].includes(n.state) ? 'due' : '') + '<span>' + esc(fmt(n.created_at)) + '</span><span>For ' + esc(currentUser.name) + '</span></span></button>').join('') : '<div class="card empty">No reminders or notifications for you yet.</div>';
+  $('inboxList').innerHTML = list.length ? list.map(n => '<button class="notification-card" data-request="' + esc(n.ticket_id) + '"><span class="eyebrow">' + esc(KIND_LABEL[n.kind] || n.kind) + '</span><strong>' + esc(ticketById(n.ticket_id)?.note) + '</strong><span class="meta">' + badge(deliveryStateLabel(n.state), ['failed', 'retrying'].includes(n.state) ? 'due' : '') + '<span>' + esc(fmt(n.created_at)) + '</span></span>' + (n.state==='cancelled'?'<p class="hint">'+esc(notificationCancellationText(n))+'</p>':'') + '</button>').join('') : '<div class="card empty">Nothing for you right now. Reminders and important messages will show here.</div>';
 }
 function renderStaff() {
   if (currentUser.role !== 'admin') return;
@@ -153,8 +204,8 @@ function openStaffAccount(action,id=null) {
   accountAction=action;accountId=id;$('staffAccountForm').reset();
   $('accountFields').disabled=action==='access';show('accountFields',action!=='access');
   $('accountPassword').required=action==='create';$('accountPasswordRepeat').required=action==='create';
-  $('staffAccountTitle').textContent=action==='create'?'Create staff login':action==='access'?(member.is_active?'Deactivate':'Activate')+' '+member.name:'Manage '+member.name;
-  $('accountActionHint').textContent=action==='create'?'Choose the login email and initial password. Staff will use these to sign in.':action==='access'?'Verify your Admin password to change this account’s access.':'Update staff details. Leave the new password blank to keep the current password.';
+  $('staffAccountTitle').lastChild.textContent=action==='create'?'Create staff login':action==='access'?(member.is_active?'Deactivate':'Activate')+' '+member.name:'Manage '+member.name;
+  $('accountActionHint').textContent=action==='create'?'Add the person’s name, work email and password. They can sign in as soon as you save.':action==='access'?'Enter your Admin password to change this person’s access.':'Change the details you need. Leave the password blank to keep it as it is.';
   if(member){$('accountName').value=member.name;$('accountDepartment').value=member.department;$('accountEmail').value=member.email||'';$('accountPhone').value=member.phone;$('accountNotificationEmail').value=member.notification_email||'';}
   $('staffAccountDialog').showModal();
   accountCaptchaWidget=mountCaptcha('accountCaptcha',accountCaptchaWidget);
@@ -177,37 +228,47 @@ function bars(rows) {
 }
 function renderReports() {
   const tickets = state().tickets, open = tickets.filter(t => t.status !== 'Resolved'), resolved = tickets.filter(t => t.status === 'Resolved');
-  $('reportSummary').innerHTML = metric('Open requests', open.length) + metric('24h overdue', open.filter(isDue).length) + metric('Unacknowledged urgent', open.filter(isUrgent).length) + metric('Resolved requests', resolved.length);
+  $('reportSummary').innerHTML = metric('In progress', open.length) + metric('Updates overdue', open.filter(isDue).length) + metric('Urgent to confirm', open.filter(isUrgent).length) + metric('Done', resolved.length);
   $('typeReport').innerHTML = bars(Object.entries(TYPE_LABEL).map(([type, label]) => [label, open.filter(t => t.type === type).length]));
   $('workloadReport').innerHTML = bars(state().team.map(user => [user.name, open.filter(t => t.assignee_id === user.id).length]).concat([['Shared queue', open.filter(t => !t.assignee_id).length]]));
-  $('resolvedReport').innerHTML = resolved.length ? '<table class="data-table"><thead><tr><th>Request</th><th>Assigned person</th><th>Resolved (IST)</th></tr></thead><tbody>' + resolved.sort((a, b) => Date.parse(b.resolved_at) - Date.parse(a.resolved_at)).map(t => '<tr><td><button class="btn compact" data-request="' + esc(t.id) + '">' + esc(t.note) + '</button></td><td>' + esc(userById(t.assignee_id)?.name || 'Shared queue') + '</td><td>' + esc(fmt(t.resolved_at)) + '</td></tr>').join('') + '</tbody></table>' : '<p class="hint">Resolved work will appear here.</p>';
+  $('resolvedReport').innerHTML = resolved.length ? '<table class="data-table"><thead><tr><th>Request</th><th>With</th><th>Done on</th></tr></thead><tbody>' + resolved.sort((a, b) => Date.parse(b.resolved_at) - Date.parse(a.resolved_at)).map(t => '<tr><td><button class="btn compact" data-request="' + esc(t.id) + '">' + esc(t.note) + '</button></td><td>' + esc(userById(t.assignee_id)?.name || 'Team queue') + '</td><td>' + esc(fmt(t.resolved_at)) + '</td></tr>').join('') + '</tbody></table>' : '<p class="hint">Finished requests will appear here.</p>';
 }
 function deliveryMarkup(notification, allowRetry = false) {
   const attempts = state().deliveries.filter(d => d.notification_id === notification.id).sort((a, b) => Date.parse(a.attempted_at) - Date.parse(b.attempted_at));
-  return '<article class="card delivery-card"><div class="delivery-top"><div><span class="eyebrow">' + esc(KIND_LABEL[notification.kind] || notification.kind) + '</span><h3>' + esc(ticketById(notification.ticket_id)?.note) + '</h3><p class="hint">To ' + esc(userById(notification.recipient_id)?.name) + ' · ' + esc(fmt(notification.created_at)) + '</p></div>' + badge(notification.state, notification.state === 'failed' ? 'urgent' : notification.state === 'retrying' ? 'due' : '') + '</div><div class="attempt-list">' + attempts.map(d => '<div class="attempt-row"><strong>' + esc(d.channel) + '</strong>' + badge(d.state, d.state === 'failed' || d.state === 'bounced' ? 'due' : 'resolved') + '<span class="hint">' + esc(fmt(d.attempted_at)) + ' · ' + esc(d.error_message || 'Provider ' + d.state) + '</span></div>').join('') + '</div>' + (notification.next_attempt_at ? '<p class="hint">Next retry: ' + esc(fmt(notification.next_attempt_at)) + ' · Retry count: ' + notification.attempt_count + '</p>' : '') + (allowRetry && notification.state === 'failed' && ticketById(notification.ticket_id)?.status !== 'Resolved' ? '<button class="btn compact" data-retry="' + esc(notification.id) + '">Retry delivery</button>' : '') + '</article>';
+  const cancellation=notificationCancellationText(notification),timing=notificationTimingText(notification,fmt);
+  return '<article class="card delivery-card"><div class="delivery-top"><div><span class="eyebrow">' + esc(KIND_LABEL[notification.kind] || notification.kind) + '</span><h3>' + esc(ticketById(notification.ticket_id)?.note) + '</h3><p class="hint">To ' + esc(userById(notification.recipient_id)?.name) + ' · ' + esc(fmt(notification.created_at)) + '</p></div>' + badge(deliveryStateLabel(notification.state), notification.state === 'failed' ? 'urgent' : notification.state === 'retrying' ? 'due' : '') + '</div><div class="attempt-list">' + attempts.map(d => '<div class="attempt-row"><strong>' + esc(d.channel) + '</strong>' + badge(deliveryStateLabel(d.state), d.state === 'failed' || d.state === 'bounced' ? 'due' : 'resolved') + '<span class="hint">' + esc(fmt(d.attempted_at)) + ' · ' + esc(d.error_message || 'Message ' + deliveryStateLabel(d.state).toLowerCase()) + '</span></div>').join('') + '</div>' + (cancellation?'<p class="hint">'+esc(cancellation)+'</p>':'') + (timing?'<p class="hint">'+esc(timing)+'</p>':'') + (allowRetry && notification.state === 'failed' && ticketById(notification.ticket_id)?.status !== 'Resolved' ? '<button class="btn compact" data-retry="' + esc(notification.id) + '">Try sending again</button>' : '') + '</article>';
 }
 function renderDeliveries() {
   const list = [...state().notifications].sort((a, b) => { const order = { failed: 0, retrying: 1, queued: 2, sent: 3, cancelled: 4 }; return order[a.state] - order[b.state] || Date.parse(b.created_at) - Date.parse(a.created_at) });
-  $('deliverySummary').innerHTML = metric('Needs attention', list.filter(n => n.state === 'failed').length, 'Unresolved failed notifications') + metric('Retry scheduled', list.filter(n => n.state === 'retrying').length) + metric('Sent', list.filter(n => n.state === 'sent').length, 'Provider acceptance only') + metric('Cancelled', list.filter(n => n.state === 'cancelled').length);
-  $('deliveryList').innerHTML = list.map(n => deliveryMarkup(n, true)).join('') || '<div class="empty">No delivery activity yet.</div>';
-  if(state().workerRuns?.length)$('deliveryList').insertAdjacentHTML('afterbegin','<article class="card report-card"><h2>Recent background jobs</h2>'+state().workerRuns.slice(0,10).map(run=>'<p>'+esc(run.worker)+' · '+esc(run.status)+' · '+esc(fmt(run.finished_at))+(run.error_message?' · '+esc(run.error_message):'')+'</p>').join('')+'</article>');
+  $('deliverySummary').innerHTML = metric('Needs attention', list.filter(n => n.state === 'failed').length, 'Messages that could not be sent') + metric('Trying again', list.filter(isNotificationRetryScheduled).length, 'Messages scheduled to send again') + metric('Sent', list.filter(n => n.state === 'sent').length, 'Accepted for delivery') + metric('Not sent', list.filter(n => n.state === 'cancelled').length, 'No message was sent');
+  $('deliveryList').innerHTML = list.map(n => deliveryMarkup(n, true)).join('') || '<div class="empty">No messages to show yet.</div>';
+  if(state().workerRuns?.length)$('deliveryList').insertAdjacentHTML('afterbegin','<article class="card report-card"><h2>Recent system checks</h2>'+state().workerRuns.slice(0,10).map(run=>'<p>'+esc(run.worker)+' · '+esc(run.status)+' · '+esc(fmt(run.finished_at))+(run.error_message?' · '+esc(run.error_message):'')+'</p>').join('')+'</article>');
 }
 
-function fillProjects() { const client = $('clientSelect').value, service = $('ticketType').value === 'service'; $('projectSelect').innerHTML = (service ? '' : '<option value="">No project</option>') + options(state().projects.filter(p => !service || p.client_id === client).map(p => p.id), projectName) }
+function fillProjects() {
+  const client=$('clientSelect').value,service=$('ticketType').value==='service';
+  const projects=state().projects.filter(p=>!service||p.client_id===client);
+  $('projectSelect').required=service;
+  $('clientSelect').required=service;
+  $('projectSelect').innerHTML=(service?(projects.length?'':'<option value="">No projects for this client</option>'):'<option value="">No project</option>')+options(projects.map(p=>p.id),projectName);
+  $('projectHint').textContent=service?(projects.length?'Choose which project this is about.':'No projects are listed for this client yet. Ask your Admin to add one.'):'You can skip this if it does not apply.';
+}
 function openNew() {
   if (busy) return; $('newTicketForm').reset(); revokeURLs(previewURLs); $('filePreview').innerHTML = '';
   $('ticketType').innerHTML = options(allowedTypes(currentUser), type => TYPE_LABEL[type]); $('clientSelect').innerHTML = options(state().clients.map(c => c.id), id => state().clients.find(c => c.id === id).name); fillProjects(); updateTypeFields(); $('newTicketDialog').showModal();
 }
 function recipientOptions(type, { detail = false } = {}) {
   let people = recipients(state(), type); if (!canManage(currentUser)) people = people.filter(user => user.id === currentUser.id);
-  return '<option value="">' + (type === 'urgent_message' ? 'Choose a recipient' : 'Shared queue') + '</option>' + options(people.map(user => user.id), id => userById(id).name + ' · ' + ROLE_LABEL[userById(id).role] + (id === currentUser.id ? ' (me)' : ''));
+  return '<option value="">' + (type === 'urgent_message' ? 'Choose a person' : 'Let the team choose') + '</option>' + options(people.map(user => user.id), id => userById(id).name + (id === currentUser.id ? ' (you)' : ''));
 }
 function updateTypeFields() {
   const type = $('ticketType').value, follow = type === 'follow_up';
   show('clientField', type === 'service'); show('projectField', true); show('reminderField', follow); show('customReminderField', follow && $('reminderPreset').value === 'custom'); show('assigneeField', !follow);
   const oldProject = $('projectSelect').value; fillProjects(); if ([...$('projectSelect').options].some(option => option.value === oldProject)) $('projectSelect').value = oldProject;
   const previous = $('assigneeSelect').value; $('assigneeSelect').innerHTML = recipientOptions(type); if ([...$('assigneeSelect').options].some(option => option.value === previous)) $('assigneeSelect').value = previous;
-  $('routingHint').textContent = follow ? 'This is your personal reminder. It stays assigned to you.' : type === 'urgent_message' ? 'Choose one active recipient. They must explicitly acknowledge this message.' : canManage(currentUser) ? 'Assign to an eligible colleague or leave it in the shared queue.' : 'Choose yourself or the shared queue. Admin can assign it to a colleague.';
+  $('typeHint').textContent = ({service:'For work connected to a client or project.',help_ticket:'For help from your team, such as drawings, materials, or a repair.',follow_up:'A private reminder for yourself. Example: Call the client tomorrow.',urgent_message:'Send a message to one person that needs their confirmation.'})[type] || 'Choose the option that best matches what you need.';
+  $('ticketNote').placeholder = ({service:'Example: Please measure the kitchen cabinets during the site visit.',help_ticket:'Example: Please send the latest design drawings for review.',follow_up:'Example: Call the client about the meeting time.',urgent_message:'Example: Please call me about today’s delivery.'})[type] || 'Briefly tell us what you need.';
+  $('routingHint').textContent = follow ? 'Only you can see this personal reminder.' : type === 'urgent_message' ? 'Choose one person. They will be asked to confirm they saw your message.' : canManage(currentUser) ? 'Choose a person, or leave this for the team to pick up.' : 'Choose yourself or leave this for the team to pick up. An Admin can assign it later.';
 }
 const FORMATS = new Set(['image/jpeg', 'image/png', 'image/webp', 'video/mp4', 'video/quicktime', 'video/webm']);
 function validateFiles(files) {
@@ -225,15 +286,28 @@ async function createRequest(event) {
   event.preventDefault(); await run($('submitTicket'), async () => {
     const files = [...$('ticketFiles').files]; validateFiles(files); const type = $('ticketType').value;
     const input = {type,note:$('ticketNote').value,project_id:$('projectSelect').value||null,assignee_id:type==='follow_up'?null:$('assigneeSelect').value||null,reminder_at:type==='follow_up'?reminderValue():null};
-    let ticket;
+    if(type==='service'&&!input.project_id)throw new Error('Choose a client and project for this request. If the project is missing, ask your Admin to add it.');
+    if(!currentUser||!connected)throw new Error('Sign in and reconnect before making a change.');
+    let ticket,uploadError;
     show('uploadProgress',files.length>0);
     try {
-      ticket=await change(()=>repository.create(input));
+      // Capture the committed request before any workspace reload can fail.
+      try {
+        ticket=await repository.createWithAttachments(input,files,(done,total)=>{
+          $('uploadProgress').querySelector('span').style.width=Math.round(done/total*100)+'%';
+        });
+      } catch(error) {
+        if(!error.savedRequest)throw error;
+        ticket=error.savedRequest;uploadError=error;
+      }
       $('newTicketDialog').close();revokeURLs(previewURLs);$('filePreview').innerHTML='';$('newTicketForm').reset();
-      if(files.length)await change(()=>repository.upload(ticket.id,files,(done,total)=>{$('uploadProgress').querySelector('span').style.width=Math.round(done/total*100)+'%';}));
-      toast('Request created and recorded in the trail.');
-    } catch(error) {if(ticket)throw new Error('Request created. '+error.message);throw error;}
-    finally{show('uploadProgress',false);}
+      // Clear filters so a saved request is visible in the workspace.
+      $('search').value='';$('scopeFilter').value='relevant';$('typeFilter').value='';$('statusFilter').value='';
+      try {await refresh();}
+      catch {throw new Error('Request saved (ID: '+ticket.id+'), but the workspace could not reload. '+(uploadError?uploadError.message+' ':'')+'Sign in again to view it. Do not submit it again.');}
+      if(uploadError)throw uploadError;
+      toast('Request sent.');
+    } finally{show('uploadProgress',false);$('uploadProgress').querySelector('span').style.width='0%';}
   });
 }
 
@@ -241,23 +315,23 @@ async function openTicket(id, { recordRead = true } = {}) {
   if (busy) return; const ticket = ticketById(id); if (!canView(currentUser, ticket)) { toast('This request is outside your workspace.', true); return }
   if (recordRead) {busy=true;try{await change(()=>repository.read(id));}finally{busy=false;}}
   currentTicketId = id; const t = ticketById(id), creator = actorName(t.created_by), assignee = userById(t.assignee_id);
-  $('detailProject').textContent = TYPE_LABEL[t.type] + (t.project_id ? ' · ' + projectName(t.project_id) : ''); $('detailTitle').textContent = t.note;
-  $('detailBadges').innerHTML = badge(t.status, t.status === 'Resolved' ? 'resolved' : '') + (isUrgent(t) ? badge('Acknowledgement due', 'urgent') : t.urgent_acknowledged_at ? badge('Acknowledged by ' + userById(t.urgent_acknowledged_by)?.name, 'resolved') : '') + (isDue(t) ? badge('24-hour update overdue', 'due') : '');
-  $('detailSummary').textContent = 'Created by ' + creator + ' · Assigned to ' + (assignee?.name || 'shared queue') + '. ' + (t.status === 'Resolved' ? 'Resolved ' + fmt(t.resolved_at) + '.' : 'Next workflow update due ' + fmt(t.next_followup_due_at) + '.') + (t.type === 'follow_up' ? ' Personal reminder: ' + fmt(t.reminder_at) + (t.reminder_cancelled_at ? ' (cancelled)' : '') + '.' : '') + (t.expected_timeline ? ' Expected: ' + t.expected_timeline + '.' : '') + (t.urgent_read_at ? ' Recipient opened: ' + fmt(t.urgent_read_at) + '.' : '');
+  $('detailProject').textContent = TYPE_LABEL[t.type] + (t.project_id ? ' · ' + projectName(t.project_id) : ''); $('detailTitle').lastChild.textContent = t.note;
+  $('detailBadges').innerHTML = badge(displayStatus(t.status), t.status === 'Resolved' ? 'resolved' : '') + (isUrgent(t) ? badge('Needs your confirmation', 'urgent') : t.urgent_acknowledged_at ? badge('Seen by ' + userById(t.urgent_acknowledged_by)?.name, 'resolved') : '') + (isDue(t) ? badge('Update needed', 'due') : '');
+  $('detailSummary').textContent = 'Added by ' + creator + '. ' + (assignee ? 'With ' + assignee.name + '.' : t.type === 'follow_up' ? 'Only you can see this reminder.' : 'Waiting for someone to take this.') + (t.status === 'Resolved' ? ' Marked done ' + fmt(t.resolved_at) + '.' : t.next_followup_due_at ? ' ' + (isDue(t) ? 'An update was due ' : 'Next update due ') + fmt(t.next_followup_due_at) + '.' : '') + (t.type === 'follow_up' ? ' Reminder: ' + fmt(t.reminder_at) + (t.reminder_cancelled_at ? ' (stopped)' : '') + '.' : '') + (t.expected_timeline ? ' Ready by: ' + t.expected_timeline + '.' : '') + (t.urgent_read_at ? ' Opened ' + fmt(t.urgent_read_at) + '.' : '');
   show('ackWrap', canAcknowledge(currentUser, t)); show('assignmentControls', canAssign(currentUser, t)); show('updateForm', canUpdate(currentUser, t)); show('attachmentForm', canAttach(currentUser, t));
   $('detailAssignee').innerHTML = recipientOptions(t.type); $('detailAssignee').value = t.assignee_id || '';
   const allowed = t.status === 'Resolved' ? ['In Review'] : t.status === 'New' ? ['New', 'In Review', 'Resolved'] : t.status === 'In Review' ? ['In Review', 'Scheduled', 'Resolved'] : ['Scheduled', 'Resolved'];
-  $('detailStatus').innerHTML = options(allowed, status => status); $('detailStatus').value = t.status === 'Resolved' ? 'In Review' : t.status;
-  $('saveUpdate').textContent = t.status === 'Resolved' ? 'Reopen to In Review' : 'Record update'; $('internalNote').value = ''; $('expectedTimeline').value = ''; $('detailFiles').value = '';
-  $('accessNote').textContent = canUpdate(currentUser, t) ? 'Record a work update to restart the 24-hour clock. Assignment, attachments and acknowledgement do not restart it.' : canAcknowledge(currentUser, t) ? 'You can acknowledge this urgent message. Admin manages its workflow status.' : 'You can view this request and its trail. Only its eligible assignee or Admin can change the workflow.';
+  $('detailStatus').innerHTML = options(allowed, displayStatus); $('detailStatus').value = t.status === 'Resolved' ? 'In Review' : t.status;
+  $('saveUpdate').textContent = t.status === 'Resolved' ? 'Reopen and save' : 'Save update'; $('internalNote').value = ''; $('expectedTimeline').value = ''; $('detailFiles').value = '';
+  $('accessNote').textContent = canUpdate(currentUser, t) ? 'Add a short note so your team knows what changed. Saving it starts a fresh 24-hour wait for the next reminder.' : canAcknowledge(currentUser, t) ? 'Confirm when you have seen this urgent message. An Admin can update its progress.' : 'Only the assigned person or an Admin can update this request.';
   renderTimeline(t);
-  $('detailDelivery').innerHTML = state().notifications.filter(n => n.ticket_id === id).map(n => '<p>' + esc(KIND_LABEL[n.kind] || n.kind) + ' → ' + esc(userById(n.recipient_id)?.name) + ' · ' + esc(n.state) + ' · ' + esc(fmt(n.created_at)) + '</p>').join('') || '<p>No notification has been queued yet.</p>';
+  $('detailDelivery').innerHTML = state().notifications.filter(n => n.ticket_id === id).map(n => '<p>' + esc(KIND_LABEL[n.kind] || n.kind) + ' → ' + esc(userById(n.recipient_id)?.name) + ' · ' + esc(deliveryStateLabel(n.state)) + ' · ' + esc(fmt(n.created_at)) + (n.state==='cancelled'?'<br>'+esc(notificationCancellationText(n)):'') + '</p>').join('') || '<p>No messages have been sent yet.</p>';
   if (!$('ticketDialog').open) $('ticketDialog').showModal(); history.replaceState(null, '', '#request=' + encodeURIComponent(id)); await renderMedia(t);
 }
 function renderTimeline(ticket) {
   $('detailTimeline').innerHTML = state().events.filter(e => e.ticket_id === ticket.id).map((event, index) => ({ ...event, order: index })).sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at) || b.order - a.order).map(e => {
-    const details = e.event_type === 'assigned' ? 'From ' + (userById(e.metadata?.old_assignee_id)?.name || 'Shared queue') + ' to ' + (userById(e.metadata?.new_assignee_id || e.metadata?.assignee_id)?.name || 'Shared queue') : e.event_type === 'attachment_added' ? e.metadata?.original_name || e.metadata?.name || '' : e.old_status ? e.old_status + ' → ' + e.new_status : '';
-    return '<div class="event"><strong>' + esc(EVENT_LABEL[e.event_type] || e.event_type) + '</strong><p>' + esc(actorName(e.actor_user_id)) + ' · ' + esc(fmt(e.created_at)) + '</p>' + (details ? '<p>' + esc(details) + '</p>' : '') + (e.note ? '<p>' + esc(e.note) + '</p>' : '') + (e.expected_timeline ? '<p>Expected: ' + esc(e.expected_timeline) + '</p>' : '') + '</div>';
+    const details = e.event_type === 'assigned' ? 'From ' + (userById(e.metadata?.old_assignee_id)?.name || 'Team') + ' to ' + (userById(e.metadata?.new_assignee_id || e.metadata?.assignee_id)?.name || 'Team') : e.event_type === 'attachment_added' ? e.metadata?.original_name || e.metadata?.name || '' : e.old_status ? displayStatus(e.old_status) + ' → ' + displayStatus(e.new_status) : '';
+    return '<div class="event"><strong>' + esc(EVENT_LABEL[e.event_type] || e.event_type) + '</strong><p>' + esc(actorName(e.actor_user_id)) + ' · ' + esc(fmt(e.created_at)) + '</p>' + (details ? '<p>' + esc(details) + '</p>' : '') + (e.note ? '<p>' + esc(e.note) + '</p>' : '') + (e.expected_timeline ? '<p>Ready by: ' + esc(e.expected_timeline) + '</p>' : '') + '</div>';
   }).join('');
 }
 async function renderMedia(ticket) {
@@ -275,13 +349,13 @@ async function renderMedia(ticket) {
   }
 }
 async function updateRequest(event) {
-  event.preventDefault(); const id = currentTicketId; await run($('saveUpdate'), async () => { await change(()=>repository.update(id,{status:$('detailStatus').value,note:$('internalNote').value,expected_timeline:$('expectedTimeline').value})); closeDetail(); toast('Workflow update recorded.'); });
+  event.preventDefault(); const id = currentTicketId; await run($('saveUpdate'), async () => { await change(()=>repository.update(id,{status:$('detailStatus').value,note:$('internalNote').value,expected_timeline:$('expectedTimeline').value})); closeDetail(); toast('Update saved.'); });
 }
 async function assignRequest() {
-  const id = currentTicketId; await run($('saveAssignee'), async () => { await change(()=>repository.assign(id,$('detailAssignee').value||null)); closeDetail(); toast('Assignment recorded. The 24-hour deadline is unchanged.'); });
+  const id = currentTicketId; await run($('saveAssignee'), async () => { await change(()=>repository.assign(id,$('detailAssignee').value||null)); closeDetail(); toast('Person updated.'); });
 }
 async function acknowledge() {
-  const id = currentTicketId; await run($('acknowledgeBtn'), async () => { await change(()=>repository.acknowledge(id)); closeDetail(); toast('Acknowledged. Your receipt is recorded.'); });
+  const id = currentTicketId; await run($('acknowledgeBtn'), async () => { await change(()=>repository.acknowledge(id)); closeDetail(); toast('Your confirmation was saved.'); });
 }
 async function uploadMore(event) {
   event.preventDefault(); const id = currentTicketId; await run($('saveAttachments'), async () => {
@@ -293,6 +367,12 @@ async function handleDeepLink() {
   const match = location.hash.match(/^#request=([a-zA-Z0-9-]+)$/); if (match && currentUser) await openTicket(match[1]);
 }
 function bind() {
+  $('loginPasswordToggle').onclick=()=>setLoginPasswordVisible($('loginPassword').type==='password');
+  $('loginPassword').addEventListener('keydown',event=>{
+    if(event.key!=='Enter'||event.isComposing||event.repeat)return;
+    event.preventDefault();
+    if(!busy)$('loginForm').requestSubmit($('loginBtn'));
+  });
   if ($('loginForm')) {
     $('loginForm').onsubmit = event => {
       event.preventDefault();
@@ -307,6 +387,7 @@ function bind() {
       });
     };
   }
+  $('projectSearch').addEventListener('input',renderProjects);
   $('logout').onclick = logout; $('newTicketBtn').onclick = openNew; $('ticketType').onchange = updateTypeFields; $('reminderPreset').onchange = updateTypeFields; $('clientSelect').onchange = fillProjects; $('ticketFiles').onchange = previewFiles;
   $('newStaffBtn').onclick=()=>openStaffAccount('create');$('staffAccountForm').onsubmit=saveStaffAccount;
   $('staffAccountDialog').addEventListener('close',()=>{$('staffAccountForm').reset();accountId=null;});
@@ -331,7 +412,12 @@ function bind() {
   $('newTicketDialog').addEventListener('close', () => revokeURLs(previewURLs));
   document.querySelectorAll('dialog').forEach(dialog => dialog.addEventListener('cancel', event => { if (busy) event.preventDefault() }));
   document.addEventListener('click', event => {
+    const accountMenu=document.querySelector('.account-menu');
+    if(accountMenu?.open&&!accountMenu.contains(event.target))accountMenu.open=false;
+    const queue=event.target.closest('[data-queue]');if(queue){$('scopeFilter').value=queue.dataset.queue==='mine'?'assigned':'relevant';$('statusFilter').value=queue.dataset.queue==='done'?'Resolved':'';renderTickets();}
+    const project=event.target.closest('[data-project]');if(project){$('projectFilter').value=project.dataset.project;$('search').value='';$('scopeFilter').value='relevant';$('statusFilter').value='';switchView('requests');}
     const request = event.target.closest('[data-request]'); if (request) openTicket(request.dataset.request).catch(reportError);
+    const emptyAction=event.target.closest('[data-empty-action]');if(emptyAction){if(emptyAction.dataset.emptyAction==='create'){openNew();}else{$('search').value='';$('scopeFilter').value='relevant';$('typeFilter').value='';$('statusFilter').value='all';$('projectFilter').value='';renderTickets();}}
     const retry = event.target.closest('[data-retry]'); if (retry) run(retry, async () => { await change(()=>repository.retryDelivery(retry.dataset.retry));toast('Delivery queued for the worker.'); });
     const account=event.target.closest('[data-account]');if(account)openStaffAccount('update',account.dataset.account);
     const staff = event.target.closest('[data-staff]'); if (staff) openStaffAccount('access',staff.dataset.staff);
@@ -356,6 +442,7 @@ async function start() {
   $('refreshBtn').onclick=()=>run($('refreshBtn'),()=>refresh());
   $('pushBtn').onclick=()=>run($('pushBtn'),enablePush);
   repository=new LiveRepository(window.OAK_CONFIG);
+  chat=new TeamChat(repository,id=>userById(id)?.name||'Team member');
   if('serviceWorker' in navigator)navigator.serviceWorker.register('service-worker.js').catch(reportError);
   const siteKey=window.OAK_CONFIG?.captchaSiteKey;
   if(siteKey&&!siteKey.includes('__')){

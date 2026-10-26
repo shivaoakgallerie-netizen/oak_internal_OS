@@ -29,7 +29,23 @@ Admin sees all requests, staff contacts, reports and delivery health; creates ur
 
 PostgreSQL functions derive the actor from the verified Auth identity. RLS enforces permissions even when screens are bypassed. User-editable Auth metadata cannot grant Admin access. Deactivated staff immediately lose database access.
 
-## Workflow
+## Team chat
+
+The new **Team chat** tab is one shared text conversation for all active Admin and Staff accounts. Future active accounts join automatically and can read earlier messages. It is not a private conversation or a WhatsApp integration.
+
+Sign in → open **Team chat** → type a message → press **Enter** or **Send**. For example: “The client meeting is confirmed for 3 PM.” Use **Shift + Enter** for a new line and **Load older messages** for earlier history. Sender names and times are shown beside messages. The badge counts messages received since chat was last opened on that device, including after the app is reopened. It resets when chat is opened and is not a cross-device read receipt.
+
+Realtime updates have an eight-second polling fallback while the browser tab is visible. Failed sends keep the draft for a safe retry without duplicate messages. Messages are text-only, up to 2,000 characters, with a server-enforced limit of 20 new messages per person per minute. There are no chat email/push notifications, attachments, private messages or read receipts. Chat messages do not update a request or reset its reminder clock. Use the request's update form for official progress updates.
+
+RLS limits reads to active accounts, and the database derives each sender from their verified login. Staff cannot edit/delete messages or impersonate another employee. Admin can permanently clear the shared history for everyone using **Clear chat**; the app asks for confirmation first. Chat history is not stored in the offline cache; sign-out clears the visible conversation and draft. People can still retain messages they have already seen.
+
+**Database ready; frontend remains local:** `migrations/20261009_team_chat.sql` was applied to Supabase on October 9, 2026, and all 13 hosted schema/permission checks passed. Existing employee/request counts were unchanged and no test messages were stored. No GitHub push or frontend deployment was performed. See [SUPABASE-SETUP.md](SUPABASE-SETUP.md) for the verified state and any future rollout. Database tests cover access, input validation, sender identity, retries and rate limits. `node tests/team-chat.browser.mjs` tests the built UI against a local fixture with Playwright; set `PLAYWRIGHT_MODULE_PATH` and optionally `PLAYWRIGHT_CHANNEL` if needed. It blocks external requests and does not test the hosted Realtime service.
+
+The clear-history migration `migrations/20261010_admin_clear_team_chat.sql` has been applied to Supabase. The Admin button is available in the local build; the live frontend has not been published.
+
+The initial clear function hit this project's database safe-delete rule. The corrected function is prepared in `migrations/20261010_admin_clear_team_chat_safe_delete.sql`; apply it before testing **Clear history**. It only updates the function and reloads the API schema—it does not erase chat by itself.
+
+## Request workflow
 
 Service requires a project. Follow-up belongs to its creator and has a future reminder. Urgent requires an active recipient and explicit acknowledgement.
 

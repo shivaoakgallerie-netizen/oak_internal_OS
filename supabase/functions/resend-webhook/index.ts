@@ -1,11 +1,12 @@
-import {createClient} from 'npm:@supabase/supabase-js@2';
+import {createClient} from 'npm:@supabase/supabase-js@2.117.2';
 import {Webhook} from 'npm:svix@1.38.0';
-import {json} from '../_shared/response.ts';
+import {json,readLimitedBody} from '../_shared/response.ts';
 
 Deno.serve(async request=>{
+  if(request.method!=='POST')return json({error:'Method not allowed'},405);
   try{
-    const body=await request.text(),secret=Deno.env.get('RESEND_WEBHOOK_SECRET');
-    if(!secret)throw new Error('RESEND_WEBHOOK_SECRET is missing');
+    const body=await readLimitedBody(request,65536),secret=Deno.env.get('RESEND_WEBHOOK_SECRET');
+    if(!secret)return json({error:'Webhook is unavailable'},503);
     const payload=new Webhook(secret).verify(body,{
       'svix-id':request.headers.get('svix-id')||'',
       'svix-timestamp':request.headers.get('svix-timestamp')||'',
@@ -18,5 +19,5 @@ Deno.serve(async request=>{
     const client=createClient(Deno.env.get('SUPABASE_URL')!,Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,{auth:{persistSession:false}});
     const {error}=await client.from('delivery_attempts').update({state,updated_at:new Date().toISOString()}).eq('provider_message_id',providerId);
     if(error)throw error;return json({ok:true});
-  }catch(error){return json({error:error instanceof Error?error.message:String(error)},400)}
+  }catch(error){return json({error:error instanceof Error&&error.message==='Request too large'?'Request too large':'Invalid webhook'},error instanceof Error&&error.message==='Request too large'?413:400)}
 });

@@ -1,5 +1,6 @@
-import {createClient} from 'npm:@supabase/supabase-js@2';
-import {manageStaff} from './handler.js';
+import {createClient} from 'npm:@supabase/supabase-js@2.117.2';
+import {manageStaff,safeAccountFailure} from './handler.js';
+import {readLimitedBody} from '../_shared/response.ts';
 
 Deno.serve(async request=>{
  const origin=request.headers.get('origin')||'';
@@ -12,15 +13,14 @@ Deno.serve(async request=>{
  const token=request.headers.get('authorization')?.replace(/^Bearer\s+/i,'');
  if(!token)return response({error:'Unauthorized'},401);
  try {
-  if(Number(request.headers.get('content-length')||0)>8192)return response({error:'Request too large'},413);
-  const body=await request.text();if(body.length>8192)return response({error:'Request too large'},413);
+  const body=await readLimitedBody(request,8192);
   const url=Deno.env.get('SUPABASE_URL')!,key=Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
   const options={auth:{persistSession:false,autoRefreshToken:false}};
   const client=createClient(url,key,options),reauthClient=createClient(url,Deno.env.get('SUPABASE_ANON_KEY')!,options);
   try{return response(await manageStaff({client,reauthClient,token,input:JSON.parse(body)}));}
   finally{await reauthClient.auth.signOut({scope:'local'}).catch(()=>{});}
  }catch(error){
-  const message=error instanceof Error?error.message:'Unable to manage account';
-  return response({error:message},/Unauthorized/.test(message)?401:/Only active Admin/.test(message)?403:400);
+  const failure=safeAccountFailure(error);
+  return response({error:failure.message},failure.status);
  }
 });

@@ -1,6 +1,24 @@
 // Auth Admin calls stay on the server. Never log request bodies or passwords.
 const check=result=>{if(result.error)throw result.error;return result.data;};
 const validEmail=value=>typeof value==='string'&&value.length<=254&&/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+const safeMessages=new Set([
+ 'Unauthorized','Only active Admin can manage accounts','Invalid account action',
+ 'Enter your current Admin password.','Admin password could not be verified.',
+ 'Select a valid staff account.','Select a registered Staff account.',
+ 'Choose active or inactive.','Enter a staff name, valid login email and phone with country code.',
+ 'Choose the initial staff password.','Use a password with at least 12 characters and at most 72 UTF-8 bytes.',
+ 'Database access was updated, but Auth login access could not be synchronized. Ask the operator to retry the same access setting.',
+ 'Account setup did not complete. Contact the operator to remove an unlinked Auth account before retrying.',
+ 'Login changes saved, but staff details could not be saved. Refresh and check the account before retrying.'
+]);
+export function safeAccountFailure(error){
+ const message=error instanceof Error?error.message:'';
+ if(message==='Request too large')return {message,status:413};
+ if(error instanceof SyntaxError)return {message:'Invalid request body.',status:400};
+ if(message==='Invalid login credentials'||message==='Email not confirmed')return {message:'Admin password could not be verified.',status:401};
+ if(!safeMessages.has(message))return {message:'Account management is unavailable. Contact the operator if this continues.',status:500};
+ return {message,status:message==='Unauthorized'||message==='Admin password could not be verified.'?401:message==='Only active Admin can manage accounts'?403:400};
+}
 export async function manageStaff({client,reauthClient,token,input}) {
  const actor=check(await client.auth.getUser(token))?.user;
  if(!actor)throw new Error('Unauthorized');

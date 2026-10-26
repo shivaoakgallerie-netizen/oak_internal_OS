@@ -1,6 +1,7 @@
-import {createClient,SupabaseClient} from 'npm:@supabase/supabase-js@2';
+import {createClient,SupabaseClient} from 'npm:@supabase/supabase-js@2.117.2';
 import webpush from 'npm:web-push@3.6.7';
 import {json,requireServiceRole} from '../_shared/response.ts';
+import {safeProviderError} from '../_shared/provider.js';
 
 type NotificationRow={id:string;ticket_id:string;recipient_id:string;kind:string;attempt_count:number};
 type Ticket={id:string;note:string;type:string;status:string;assignee_id:string|null;created_by:string;next_followup_due_at:string;urgent_acknowledged_at:string|null};
@@ -11,7 +12,7 @@ const labels:Record<string,string>={assigned:'New assigned request',follow_up_du
 
 const escapeHtml=(value:string)=>value.replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]!));
 const recordAttempt=async(client:SupabaseClient,n:NotificationRow,channel:'push'|'email',state:'accepted'|'failed',provider:string,providerId?:string,error?:unknown)=>{
-  const message=error instanceof Error?error.message:error?String(error):null;
+  const message=error?safeProviderError(error):null;
   const result=await client.from('delivery_attempts').insert({notification_id:n.id,channel,provider,state,attempt_number:n.attempt_count,provider_message_id:providerId||null,error_message:message});
   if(result.error)throw result.error;
 };
@@ -19,11 +20,12 @@ const sendEmail=async(recipient:Recipient,ticket:Ticket,n:NotificationRow)=>{
   const address=recipient.notification_email||recipient.email;
   if(!address)throw new Error('Email fallback unavailable: no notification address is configured. Enable device push and monitor the in-app inbox.');
   if(!Deno.env.get('RESEND_API_KEY')||!Deno.env.get('RESEND_FROM_EMAIL'))throw new Error('Email delivery provider is not configured.');
-  const response=await fetch('https://api.resend.com/emails',{method:'POST',headers:{authorization:`Bearer ${Deno.env.get('RESEND_API_KEY')}`,'content-type':'application/json','idempotency-key':`${n.id}:email`},body:JSON.stringify({
+  const response=await fetch('https://api.resend.com/emails',{method:'POST',signal:AbortSignal.timeout(10000),headers:{authorization:`Bearer ${Deno.env.get('RESEND_API_KEY')}`,'content-type':'application/json','idempotency-key':`${n.id}:email`},body:JSON.stringify({
     from:Deno.env.get('RESEND_FROM_EMAIL'),to:[address],subject:`${labels[n.kind]||'Oak workflow'} - ${ticket.note.slice(0,80)}`,
     html:`<div style="font-family:Arial,sans-serif;max-width:620px;margin:auto"><p style="color:#8a6b46;font-weight:700">OAK GALLERIE · INTERNAL</p><h2>${escapeHtml(labels[n.kind]||'Request update')}</h2><p>Assigned recipient: ${escapeHtml(recipient.name)}</p><p>${escapeHtml(ticket.note)}</p><p><a href="${Deno.env.get('APP_URL')}#request=${ticket.id}" style="display:inline-block;padding:12px 16px;background:#171715;color:white;text-decoration:none;border-radius:8px">Open request</a></p>${n.kind.startsWith('urgent')?'<p>The assigned recipient must sign in and acknowledge this urgent message in the app.</p>':''}</div>`
   })});
-  const body=await response.json().catch(()=>({}));if(!response.ok)throw new Error(body.message||`Resend returned ${response.status}`);return body.id as string;
+  if(!response.ok)throw Object.assign(new Error('Provider request failed'),{statusCode:response.status});
+  const body=await response.json();return body.id as string;
 };
 
 async function processOne(client:SupabaseClient,n:NotificationRow,ticket:Ticket,recipient:Recipient,subscriptions:Subscription[]){
@@ -31,22 +33,35 @@ async function processOne(client:SupabaseClient,n:NotificationRow,ticket:Ticket,
   const latest=await client.from('notifications').select('state,recipient_id').eq('id',n.id).single();
   if(latest.error)throw latest.error;
   if(latest.data.state!=='processing'||latest.data.recipient_id!==n.recipient_id)return;
-  if(ticket.status==='Resolved'||(['assigned','urgent','urgent_retry'].includes(n.kind)&&ticket.assignee_id!==n.recipient_id)||(n.kind==='overdue'&&new Date(ticket.next_followup_due_at)>new Date())||(n.kind.startsWith('urgent')&&ticket.urgent_acknowledged_at)){
-    await client.from('notifications').update({state:'cancelled',processed_at:new Date().toISOString()}).eq('id',n.id).eq('state','processing');return;
+  const cancellationReason=ticket.status==='Resolved'?'request_resolved'
+    :(['assigned','urgent','urgent_retry'].includes(n.kind)&&ticket.assignee_id!==n.recipient_id)?'assignment_changed'
+    :(n.kind==='overdue'&&new Date(ticket.next_followup_due_at)>new Date())?'request_updated'
+    :(n.kind.startsWith('urgent')&&ticket.urgent_acknowledged_at)?'urgent_acknowledged':null;
+  if(cancellationReason){
+    const cancelled=await client.from('notifications').update({state:'cancelled',cancellation_reason:cancellationReason,processed_at:new Date().toISOString()}).eq('id',n.id).eq('state','processing');
+    if(cancelled.error)throw cancelled.error;
+    return;
   }
   const title=labels[n.kind]||'Oak Gallerie workflow',url=`${Deno.env.get('APP_URL')}#request=${ticket.id}`;
+  const emailAvailable=Boolean(Deno.env.get('RESEND_API_KEY')&&Deno.env.get('RESEND_FROM_EMAIL')&&(recipient.notification_email||recipient.email));
+  // Browser-only installations must wait for opt-in instead of exhausting retries.
+  if(!subscriptions.length&&!emailAvailable){
+    const deferred=await client.from('notifications').update({state:'queued',attempt_count:Math.max(0,n.attempt_count-1),next_attempt_at:new Date(Date.now()+5*60000).toISOString(),processed_at:null,last_error:'Waiting for the recipient to enable browser alerts.'}).eq('id',n.id).eq('state','processing');
+    if(deferred.error)throw deferred.error;
+    return;
+  }
   let pushAccepted=false,pushAttempted=false,lastError:unknown;
   for(const subscription of subscriptions){
     pushAttempted=true;
     try{
-      await webpush.sendNotification({endpoint:subscription.endpoint,keys:{p256dh:subscription.p256dh,auth:subscription.auth_key}},JSON.stringify({title,body:'Sign in to view your workflow notification.',url,tag:`oak-${ticket.id}`}));
+      await webpush.sendNotification({endpoint:subscription.endpoint,keys:{p256dh:subscription.p256dh,auth:subscription.auth_key}},JSON.stringify({title,body:'Sign in to view your workflow notification.',url,tag:`oak-${ticket.id}`}),{timeout:10000});
       pushAccepted=true;await recordAttempt(client,n,'push','accepted','web-push');
     }catch(error){
       lastError=error;await recordAttempt(client,n,'push','failed','web-push',undefined,error);
       const status=(error as {statusCode?:number}).statusCode;if(status===404||status===410)await client.from('push_subscriptions').update({revoked_at:new Date().toISOString()}).eq('id',subscription.id);
     }
   }
-  const mustEmail=n.kind==='urgent_retry'||!pushAttempted||!pushAccepted;
+  const mustEmail=emailAvailable&&(n.kind==='urgent_retry'||!pushAttempted||!pushAccepted);
   let emailAccepted=false;
   if(mustEmail){
     try{const id=await sendEmail(recipient,ticket,n);emailAccepted=true;await recordAttempt(client,n,'email','accepted','resend',id)}catch(error){lastError=error;await recordAttempt(client,n,'email','failed',(recipient.notification_email||recipient.email)?'resend':'unavailable',undefined,error)}
@@ -58,8 +73,9 @@ async function processOne(client:SupabaseClient,n:NotificationRow,ticket:Ticket,
     return;
   }
   const terminal=n.attempt_count>=4,delay=RETRY_MINUTES[Math.min(n.attempt_count-1,RETRY_MINUTES.length-1)];
-  await client.from('notifications').update({state:'failed',last_error:lastError instanceof Error?lastError.message:String(lastError||'No channel accepted the message'),next_attempt_at:new Date(Date.now()+delay*60000).toISOString(),processed_at:terminal?new Date().toISOString():null}).eq('id',n.id).eq('state','processing');
-  await client.from('request_events').insert({ticket_id:ticket.id,event_type:'notification_failed',metadata:{notification_id:n.id,kind:n.kind,terminal,error:lastError instanceof Error?lastError.message:String(lastError)}});
+  const failure=lastError?safeProviderError(lastError):'No channel accepted the message';
+  await client.from('notifications').update({state:'failed',last_error:failure,next_attempt_at:new Date(Date.now()+delay*60000).toISOString(),processed_at:terminal?new Date().toISOString():null}).eq('id',n.id).eq('state','processing');
+  await client.from('request_events').insert({ticket_id:ticket.id,event_type:'notification_failed',metadata:{notification_id:n.id,kind:n.kind,terminal,error:failure}});
 }
 
 Deno.serve(async request=>{
@@ -86,5 +102,5 @@ Deno.serve(async request=>{
     }
     await client.from('worker_runs').insert({worker:'notification-worker',status:'succeeded',processed_count:processed,started_at:startedAt});
     return json({claimed:rows.length,processed,finishedAt:new Date().toISOString()});
-  }catch(error){if(client)await client.from('worker_runs').insert({worker:'notification-worker',status:'failed',error_message:error instanceof Error?error.message:String(error),started_at:startedAt});return json({error:error instanceof Error?error.message:String(error)},error instanceof Error&&error.message==='Unauthorized'?401:500)}
+  }catch(error){const unauthorized=error instanceof Error&&error.message==='Unauthorized';if(client)try{await client.from('worker_runs').insert({worker:'notification-worker',status:'failed',error_message:safeProviderError(error),started_at:startedAt});}catch{}return json({error:unauthorized?'Unauthorized':'Notification worker failed'},unauthorized?401:500)}
 });

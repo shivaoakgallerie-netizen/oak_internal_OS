@@ -2,10 +2,50 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {PGlite} from '@electric-sql/pglite';
-import {normalizePhone,validatePublicConfig,allowedTypes,canUpdate,canView,canAcknowledge} from '../workflow-rules.js';
+import {normalizePhone,validatePublicConfig,allowedTypes,canUpdate,canView,canAcknowledge,notificationCancellationText,notificationTimingText,isNotificationRetryScheduled} from '../workflow-rules.js';
 import {LiveRepository} from '../live-client.js';
 import {parseStaffRoster,staffAuthFields,planRosterIdentity} from '../scripts/staff-roster.mjs';
-import {manageStaff} from '../supabase/functions/manage-staff/handler.js';
+import {manageStaff,safeAccountFailure} from '../supabase/functions/manage-staff/handler.js';
+import {readLimitedBody,requireServiceRole} from '../supabase/functions/_shared/response.ts';
+import {safeProviderError} from '../supabase/functions/_shared/provider.js';
+
+test('edge request bodies are byte bounded before processing',async()=>{
+ assert.equal(await readLimitedBody(new Request('https://example.test',{method:'POST',body:'ok'}),2),'ok');
+ await assert.rejects(()=>readLimitedBody(new Request('https://example.test',{method:'POST',body:'€'}),2),/Request too large/);
+ await assert.rejects(()=>readLimitedBody(new Request('https://example.test',{method:'POST',headers:{'content-length':'100'},body:'x'}),2),/Request too large/);
+ await assert.rejects(()=>readLimitedBody(new Request('https://example.test',{method:'POST',body:new Uint8Array([255])}),2),/Invalid UTF-8/);
+});
+
+test('notification cron accepts only unexpired gateway-verified service-role JWT claims',()=>{
+ const token=claims=>`header.${Buffer.from(JSON.stringify(claims)).toString('base64url')}.signature`;
+ const invoke=value=>requireServiceRole(new Request('https://example.test',{headers:{authorization:`Bearer ${value}`}}));
+ assert.doesNotThrow(()=>invoke(token({role:'service_role',iss:'supabase',exp:Math.floor(Date.now()/1000)+60})));
+ assert.throws(()=>invoke(token({role:'anon',iss:'supabase',exp:Math.floor(Date.now()/1000)+60})),/Unauthorized/);
+ assert.throws(()=>invoke(token({role:'service_role',iss:'supabase',exp:1})),/Unauthorized/);
+ assert.throws(()=>invoke('not-a-jwt'),/Unauthorized/);
+});
+
+test('edge failures do not disclose backend or provider exception text',()=>{
+ assert.deepEqual(safeAccountFailure(new Error('database key: private-value')),{
+  message:'Account management is unavailable. Contact the operator if this continues.',status:500
+ });
+ assert.deepEqual(safeAccountFailure(new Error('Invalid login credentials')),{message:'Admin password could not be verified.',status:401});
+ assert.deepEqual(safeAccountFailure(new Error('Only active Admin can manage accounts')),{message:'Only active Admin can manage accounts',status:403});
+ assert.deepEqual(safeAccountFailure(new Error('Request too large')),{message:'Request too large',status:413});
+ assert.equal(safeProviderError(new Error('Authorization: Bearer private-value')),'Provider request failed');
+ assert.equal(safeProviderError(Object.assign(new Error('private-value'),{statusCode:503})),'Provider returned HTTP 503');
+});
+
+test('chat client sends only text and an idempotency ID, and pages history by ID',async()=>{
+ const calls=[];
+ const query={select:()=>query,lt:(key,value)=>{calls.push(['lt',key,value]);return query;},gt:(key,value)=>{calls.push(['gt',key,value]);return query;},order:(key,value)=>{calls.push(['order',key,value]);return query;},limit:async value=>{calls.push(['limit',value]);return {data:[{id:2},{id:1}]};}};
+ const repo=new LiveRepository({supabaseUrl:'https://example.supabase.co',publishableKey:'sb_publishable_test'},()=>({from:name=>{assert.equal(name,'team_chat_messages');return query;},rpc:(name,args)=>{calls.push([name,args]);return {single:async()=>({data:{id:3}})};}}));
+ assert.deepEqual((await repo.chatMessages()).map(row=>row.id),[1,2]);
+ await repo.chatMessages({before:20});await repo.chatMessages({after:10});
+ await repo.sendChatMessage('Hello','client-uuid');
+ assert(calls.some(call=>call[0]==='lt'&&call[2]===20));assert(calls.some(call=>call[0]==='gt'&&call[2]===10));
+ assert.deepEqual(calls.at(-1),['send_team_message',{p_body:'Hello',p_client_message_id:'client-uuid'}]);
+});
 
 test('phone-only roster keeps two distinct identities without fake email or passwords',()=>{
  const header='name,phone_e164,email,role,active\n';
@@ -59,6 +99,36 @@ test('presentation permissions respect exactly two roles',()=>{
  assert.deepEqual(allowedTypes(staff),['service','help_ticket','follow_up']);
  assert.equal(canUpdate(staff,other),false);assert.equal(canView(staff,other),false);assert.equal(canAcknowledge(staff,other),false);
  assert.equal(canUpdate({...staff,is_active:false},{...other,assignee_id:'a'}),false);
+});
+test('notification cards explain recorded cancellations and only show actionable schedules',()=>{
+ const notification={state:'cancelled',cancellation_reason:'request_resolved',next_attempt_at:'tomorrow',attempt_count:0};
+ assert.equal(notificationCancellationText(notification),'The request was marked Done. This notification will not be sent.');
+ for(const reason of ['request_updated','assignment_changed','recipient_inactive','urgent_acknowledged'])
+  assert.doesNotMatch(notificationCancellationText({...notification,cancellation_reason:reason}),/not recorded/);
+ for(const reason of [undefined,'unknown','constructor'])
+  assert.match(notificationCancellationText({...notification,cancellation_reason:reason}),/reason was not recorded/);
+ assert.equal(notificationCancellationText({...notification,state:'sent'}),'');
+ const format=value=>value;
+ for(const state of ['cancelled','sent','acknowledged','processing'])
+  assert.equal(notificationTimingText({...notification,state},format),'');
+ assert.equal(notificationTimingText({...notification,state:'queued'},format),'Scheduled for: tomorrow');
+ assert.equal(notificationTimingText({...notification,state:'failed',attempt_count:1},format),'Next retry: tomorrow · Delivery attempts: 1');
+ assert.equal(notificationTimingText({...notification,state:'failed',attempt_count:4},format),'');
+ assert.equal(notificationTimingText({...notification,state:'failed',processed_at:'today'},format),'');
+});
+test('retry scheduled includes pending failed attempts and excludes finished or unscheduled deliveries',()=>{
+ const pending={state:'failed',attempt_count:1,processed_at:null,next_attempt_at:'2026-10-07T06:00:00Z'};
+ const eligible=[pending,{...pending,attempt_count:3,next_attempt_at:'2020-01-01T00:00:00Z'}];
+ const excluded=[
+  ...['queued','processing','sent','cancelled','acknowledged'].map(state=>({...pending,state})),
+  {...pending,attempt_count:4},
+  {...pending,attempt_count:0},
+  {...pending,processed_at:'2026-10-07T05:00:00Z'},
+  {...pending,next_attempt_at:null,scheduled_for:pending.next_attempt_at}
+ ];
+ assert.equal([...eligible,...excluded].filter(isNotificationRetryScheduled).length,2);
+ for(const notification of eligible)assert.match(notificationTimingText(notification,value=>value),/^Next retry:/);
+ for(const notification of excluded.filter(n=>n.state==='failed'))assert.equal(notificationTimingText(notification,value=>value),'');
 });
 test('login uses server password verification and derives actor from verified user',async()=>{
  let submitted,signouts=0;
@@ -138,6 +208,29 @@ test('request and upload RPCs return one record and never submit a forged actor'
  assert.equal(await repo.mediaUrl({storage_path:'ticket/file.jpg'}),'https://example.test/private');
 });
 
+test('request with images saves the description before uploading and reports partial saves',async()=>{
+ const repo=new LiveRepository({supabaseUrl:'https://example.supabase.co',publishableKey:'sb_publishable_public'},()=>({}));
+ const ticket={id:'saved-request',note:'Repair the cabinet'},calls=[];
+ repo.create=async input=>{calls.push('create');assert.equal(input.note,ticket.note);return ticket;};
+ repo.upload=async(id,files)=>{calls.push('upload');assert.equal(id,ticket.id);assert.equal(files.length,1);};
+ const files=[{name:'cabinet.jpg',type:'image/jpeg',size:100}];
+ assert.equal(await repo.createWithAttachments({note:ticket.note},files),ticket);
+ assert.deepEqual(calls,['create','upload']);
+ repo.upload=async()=>{throw new Error('Storage upload denied');};
+ await assert.rejects(()=>repo.createWithAttachments({note:ticket.note},files),error=>{
+  assert.equal(error.savedRequest,ticket);assert.match(error.message,/Request saved.*Storage upload denied/);return true;
+ });
+ repo.create=async()=>{throw new Error('Request denied');};
+ await assert.rejects(()=>repo.createWithAttachments({},files),error=>{
+  assert.equal(error.savedRequest,undefined);assert.equal(error.message,'Request denied');return true;
+ });
+});
+
+test('reservation failures include attachment progress for a saved request',async()=>{
+ const repo=new LiveRepository({supabaseUrl:'https://example.supabase.co',publishableKey:'sb_publishable_public'},()=>({rpc:()=>({single:async()=>({error:new Error('Reservation denied')})})}));
+ await assert.rejects(()=>repo.upload('ticket',[{name:'file.jpg',type:'image/jpeg',size:100}]),/0 of 1 attachments saved.*Reservation denied/);
+});
+
 test('PostgreSQL enforces authorization, immutable events, clocks and attachment ownership',async t=>{
  const db=new PGlite();
  try{
@@ -168,6 +261,12 @@ test('PostgreSQL enforces authorization, immutable events, clocks and attachment
   await db.exec(contactMigration);await db.exec(contactMigration);
   const accountMigration=await readFile(new URL('../migrations/20261005_admin_managed_accounts.sql',import.meta.url),'utf8');
   await db.exec(accountMigration);await db.exec(accountMigration);
+  const requestAccessMigration=await readFile(new URL('../migrations/20261006_new_staff_request_access.sql',import.meta.url),'utf8');
+  await db.exec(requestAccessMigration);await db.exec(requestAccessMigration);
+  const cancellationMigration=await readFile(new URL('../migrations/20261007_notification_cancellation_reasons.sql',import.meta.url),'utf8');
+  await db.exec(cancellationMigration);await db.exec(cancellationMigration);
+  const chatMigration=await readFile(new URL('../migrations/20261009_team_chat.sql',import.meta.url),'utf8');
+  await db.exec(chatMigration);await db.exec(chatMigration);
   const ids={admin:'00000000-0000-4000-8000-000000000001',a:'00000000-0000-4000-8000-000000000002',b:'00000000-0000-4000-8000-000000000003',unknown:'00000000-0000-4000-8000-000000000004'};
   const rows=(await db.query(`insert into public.team_users(auth_user_id,name,phone,email,role) values
    ($1,'Owner','+919900000001','owner@example.test','admin'),
@@ -218,6 +317,29 @@ test('PostgreSQL enforces authorization, immutable events, clocks and attachment
    await actor('admin');assert.equal((await q('select * from public.account_events')).length,1);
    await db.exec('reset role');
   });
+  await t.test('new Admin-created accounts can send requests without a separate activation step',async()=>{
+   // Verify explicit activation even if an installation has a different default.
+   await db.exec('reset role; alter table public.team_users alter column is_active set default false');
+   await actor('', 'service_role');
+   const member=(await q('select * from public.save_managed_staff($1,$2,$3,$4,$5,$6,$7,$8)',[ids.admin,ids.unknown,'New Staff','+919900000004','new@example.test',null,'Team','created']))[0];
+   assert.equal(member.role,'staff');assert.equal(member.is_active,true);
+   assert.deepEqual(allowedTypes(member),['service','help_ticket','follow_up']);
+   await actor('unknown');
+   const request=await create('help_ticket','First request from new account');
+   assert.equal(request.created_by,ids.unknown);
+   assert.equal((await q('select id from public.tickets where id=$1',[request.id])).length,1);
+   const chatMessage=(await q('select * from public.send_team_message($1,$2)',['Hello from a new login',crypto.randomUUID()]))[0];
+   assert.equal(chatMessage.sender_id,member.id);
+   assert.equal((await q('select id from public.team_chat_messages where id=$1',[chatMessage.id])).length,1);
+   await actor('', 'service_role');
+   await q("insert into public.notifications(ticket_id,recipient_id,kind,dedupe_key) values($1,$2,'overdue','test-deactivation')",[request.id,member.id]);
+   await q('select public.set_managed_staff_access($1,$2,false)',[ids.admin,member.id]);
+   assert.equal((await q("select cancellation_reason from public.notifications where dedupe_key='test-deactivation'"))[0].cancellation_reason,'recipient_inactive');
+   const updated=(await q('select * from public.save_managed_staff($1,$2,$3,$4,$5,$6,$7,$8)',[ids.admin,ids.unknown,'New Staff','+919900000004','new@example.test',null,'Team','profile_updated']))[0];
+   assert.equal(updated.is_active,false);
+   await actor('unknown');await rejected('select * from public.create_request($1,$2)',['help_ticket','Inactive request']);
+   await db.exec('reset role; alter table public.team_users alter column is_active set default true');
+  });
   await t.test('only Admin adds real client projects',async()=>{
    await actor('a');await rejected('select * from public.create_project($1,$2,$3,$4)',['Client','+919900003333','Site','Kolkata']);
    await actor('admin');
@@ -259,11 +381,38 @@ test('PostgreSQL enforces authorization, immutable events, clocks and attachment
    assert.equal(Date.parse(update.next_followup_due_at)-Date.parse(update.last_status_update_at),86400000);
    const follow=await create('follow_up','Call client',null,new Date(Date.now()+3600000).toISOString());
    assert.equal(follow.assignee_id,a.id);
+   await q('select * from public.record_request_update($1,$2,$3,$4)',[follow.id,'In Review','Waiting for client','Tomorrow']);
+   assert.deepEqual((await q('select state,cancellation_reason from public.notifications where ticket_id=$1',[follow.id]))[0],{state:'queued',cancellation_reason:null});
    await q('select * from public.record_request_update($1,$2,$3,$4)',[follow.id,'Resolved','Client confirmed',null]);
-   assert.equal((await q('select state from public.notifications where ticket_id=$1',[follow.id]))[0].state,'cancelled');
+   assert.deepEqual((await q('select state,cancellation_reason from public.notifications where ticket_id=$1',[follow.id]))[0],{state:'cancelled',cancellation_reason:'request_resolved'});
    await q('select * from public.record_request_update($1,$2,$3,$4)',[follow.id,'In Review','Client changed requirement','Tomorrow']);
    assert.equal((await q('select state from public.notifications where ticket_id=$1',[follow.id]))[0].state,'cancelled');
    assert((await q('select reminder_cancelled_at from public.tickets where id=$1',[follow.id]))[0].reminder_cancelled_at);
+   // Simulate an older record; audit history still proves resolution after reopening.
+   await db.exec('reset role');
+   await q('update public.notifications set cancellation_reason=null where ticket_id=$1',[follow.id]);
+   await db.exec(cancellationMigration);
+   assert.equal((await q('select cancellation_reason from public.notifications where ticket_id=$1',[follow.id]))[0].cancellation_reason,'request_resolved');
+   await actor('a');
+  });
+  await t.test('cancellation reasons distinguish reassignment and overdue resets, without guessing old causes',async()=>{
+   await actor('admin');
+   const request=await create('help_ticket','Cancellation history',a.id);
+   await q('select * from public.assign_request($1,$2)',[request.id,b.id]);
+   assert.equal((await q('select cancellation_reason from public.notifications where ticket_id=$1 and recipient_id=$2',[request.id,a.id]))[0].cancellation_reason,'assignment_changed');
+   await actor('', 'service_role');
+   await q("insert into public.notifications(ticket_id,recipient_id,kind,dedupe_key) values($1,$2,'overdue','test-overdue-reset')",[request.id,b.id]);
+   await actor('b');
+   await q('select * from public.record_request_update($1,$2,$3,$4)',[request.id,'In Review','Review started','Tomorrow']);
+   assert.equal((await q("select cancellation_reason from public.notifications where dedupe_key='test-overdue-reset'"))[0].cancellation_reason,'request_updated');
+   await actor('admin');
+   await q('select * from public.record_request_update($1,$2,$3,$4)',[request.id,'Resolved','Finished',null]);
+   await db.exec('reset role');
+   // A resolved request today is not proof of an unrelated earlier cancellation.
+   await q("insert into public.notifications(ticket_id,recipient_id,kind,state,processed_at,dedupe_key) values($1,$2,'follow_up_due','cancelled',now()-interval '1 day','test-unknown-cause')",[request.id,b.id]);
+   await db.exec(cancellationMigration);
+   assert.equal((await q("select cancellation_reason from public.notifications where dedupe_key='test-unknown-cause'"))[0].cancellation_reason,null);
+   await actor('a');
   });
   let reservation;
   await t.test('attachments require reserved request access and matching stored metadata',async()=>{
@@ -304,12 +453,37 @@ test('PostgreSQL enforces authorization, immutable events, clocks and attachment
    await actor('a');await q('select public.revoke_push_subscription($1)',['https://fcm.googleapis.com/fcm/send/test-device']);
    await actor('b');await q('select public.register_push_subscription($1,$2,$3,null)',['https://fcm.googleapis.com/fcm/send/test-device',publicKey,authKey]);
   });
+  await t.test('shared chat enforces sender identity, immutable messages, input limits and send throttling',async()=>{
+   await actor('a');
+   const nonce=crypto.randomUUID(),body='<img src=x onerror=alert(1)> Team update';
+   const first=(await q('select * from public.send_team_message($1,$2)',[body,nonce]))[0];
+   assert.equal(first.sender_id,a.id);assert.equal(first.body,body);
+   assert.equal((await q('select * from public.send_team_message($1,$2)',[body,nonce]))[0].id,first.id);
+   await rejected('select * from public.send_team_message($1,$2)',['Changed body',nonce]);
+   for(const invalid of ['', ' \n\t ',null,'x'.repeat(2001)])await rejected('select * from public.send_team_message($1,$2)',[invalid,crypto.randomUUID()]);
+   await rejected('select * from public.send_team_message($1,null)',['Missing ID']);
+   await rejected('insert into public.team_chat_messages(sender_id,client_message_id,body) values($1,$2,$3)',[admin.id,crypto.randomUUID(),'Forged sender']);
+   await rejected('update public.team_chat_messages set body=$1 where id=$2',['Tampered',first.id]);
+   await rejected('delete from public.team_chat_messages where id=$1',[first.id]);
+   await actor('b');assert.equal((await q('select body from public.team_chat_messages where id=$1',[first.id]))[0].body,body);
+   await actor('admin');assert.equal((await q('select id from public.team_chat_messages where id=$1',[first.id])).length,1);
+   await actor('a');
+   for(let i=0;i<19;i++)await q('select * from public.send_team_message($1,$2)',['Message '+i,crypto.randomUUID()]);
+   await assert.rejects(()=>q('select * from public.send_team_message($1,$2)',['Too many',crypto.randomUUID()]),/Too many messages/);
+   // Retrying an already accepted send still succeeds after the limit, without duplication.
+   assert.equal((await q('select * from public.send_team_message($1,$2)',[body,nonce]))[0].id,first.id);
+   await actor('b');await q('select * from public.send_team_message($1,$2)',['Another person can still send',crypto.randomUUID()]);
+  });
   await t.test('deactivation revokes existing-token data access and unlisted users fail closed',async()=>{
    await db.exec('reset role');await q('update public.team_users set is_active=false where id=$1',[b.id]);
    await actor('b');assert.equal((await q('select * from public.tickets')).length,0);
+   assert.equal((await q('select * from public.team_chat_messages')).length,0);
+   await rejected('select * from public.send_team_message($1,$2)',['Inactive sender',crypto.randomUUID()]);
    await rejected('select * from public.create_request($1,$2)',['help_ticket','Deactivated']);
    await actor('unknown');assert.equal((await q('select * from public.tickets')).length,0);await rejected('select * from public.staff_directory()');
    await actor('', 'anon');await rejected('select * from public.tickets');await rejected('select * from public.create_request($1,$2)',['help_ticket','Anonymous']);
+   await rejected('select * from public.team_chat_messages');
+   await rejected('select * from public.send_team_message($1,$2)',['Anonymous sender',crypto.randomUUID()]);
   });
  }finally{await db.close();}
 });

@@ -4,6 +4,7 @@
 node_modules/
 .npm-cache/
 dist/
+output/
 staff-roster.csv
 *.secret
 backups/

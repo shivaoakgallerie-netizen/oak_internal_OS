@@ -17,6 +17,34 @@ Do not disable the guard to make a failing reset pass. Check that Auth database 
 
 ## 1. Database
 
+### Shared team chat (October 9, 2026)
+
+Applied to the hosted project on October 9, 2026, with the user's approval. The frontend remains local: no GitHub push or Netlify deployment was performed. The migration adds only chat storage, permissions and a send function; it does not delete or change requests or employee accounts.
+
+All 13 read-only hosted verification checks passed: table creation, RLS, active-staff read policy, authenticated reads, blocked direct writes, blocked anonymous reads, authenticated RPC access, blocked anonymous RPC access, the security-definer RPC's empty search path, Realtime publication membership, unchanged employee count (4), unchanged request count (8), and no stored test messages. No employee passwords or account settings were changed. Full two-account hosted sending/Realtime delivery has not been tested. Verification screenshot: `output/chat-preview/supabase-verified.jpg`.
+
+1. Already applied to this project; no rerun is needed. For a separate installation, back up the database and test on staging first. After the secure Admin/Staff schema is installed, run the complete contents of `migrations/20261009_team_chat.sql` in **Supabase → SQL Editor → New query → Run**. Do not rerun `schema.sql` on an existing database.
+2. The migration enables RLS and adds `team_chat_messages` to the `supabase_realtime` publication when that publication exists. The app also polls every eight seconds while the browser tab is visible, so chat still updates without Realtime.
+3. Run `npm test`, `npm run validate` and `npm run build`. Publish only `dist`, including the new `team-chat.js`. The service-worker cache version has been updated. The migration can be installed before the frontend; if missing, the new chat screen shows a setup notice and the existing workflow remains available.
+4. Verify with two authorized test accounts in separate browser sessions: send a message from Staff and see it as Admin; reply as Admin; check Enter/Shift + Enter, earlier history and the new-message badge while viewing Requests. Do not post sample messages in the live company room unless intended for employees.
+5. Create an active test Staff account using the normal Admin flow and verify it can see the existing conversation. Deactivate it and confirm database reads/sends are denied; sign-out must clear its displayed messages and draft. Previously viewed messages cannot be recalled from another person's device.
+
+All active employees, including new accounts, share the same history. This is text-only company chat, not private messaging or an end-to-end encrypted service. Messages are rendered as text, restricted to 2,000 characters, limited to 20 new messages per sender per minute and saved with the authenticated sender identity. Retries use a per-message reference to prevent duplicates. Chat does not trigger email/push notifications or change request status/reminder deadlines. Hosted Auth, cross-session delivery and Realtime still need rollout verification.
+
+### Admin clear-history support (prepared locally)
+
+`migrations/20261010_admin_clear_team_chat.sql` adds a server-checked Admin-only function for permanently clearing the shared chat and a revision row so connected users refresh promptly. It was applied to Supabase after user approval. The local UI asks Admin to confirm before clearing. The frontend has **not** been published.
+
+The initial function body hit the project's safe-delete rule (`DELETE requires a WHERE clause`). Apply `migrations/20261010_admin_clear_team_chat_safe_delete.sql` to replace the function with an explicit primary-key predicate and refresh the PostgREST schema cache. This corrective migration does not delete messages; the deletion only happens when an Admin confirms **Clear history** in the app.
+
+### Notification cancellation explanations (October 7, 2026)
+
+Prepared locally; not yet applied to the hosted project. After the October 5 account-management and October 6 request-access migrations, apply `migrations/20261007_notification_cancellation_reasons.sql` to staging and then the hosted database after taking a backup. Deploy the updated `notification-worker` after the migration, followed by the frontend build.
+
+The migration stores why future notifications are cancelled: request resolved, work update, reassignment or account deactivation. The worker also records acknowledgement when it cancels an obsolete urgent notification. Existing records get a reason only when an audit event matches their cancellation timestamp unambiguously. Otherwise the UI says the reason was not recorded. Reopening a request preserves the original cancellation reason. The frontend shows the explanation in My reminders, request details and Delivery health; completed/cancelled notifications show no future retry, and queued jobs display their scheduled time.
+
+Local PostgreSQL tests cover cancellation causes, normal updates that leave personal reminders queued, reopened requests, historical backfill and unchanged access controls. The frontend remains compatible with a database that has not yet received the new column, but reasons will be unavailable until the migration is applied.
+
 **Already installed for this project; do not rerun the new-install schema.** For a separate new project, use **SQL Editor → New query**, paste the entire contents of `schema.sql` and click **Run**. This creates the workflow tables, private media bucket, transactional functions and Admin/Staff policies together in one transaction. It adds no sample records or passwords.
 
 Use `schema.sql` only for a new database. For an existing workflow database, back up first and apply `migrations/20260930_secure_admin_staff.sql`. V1 Issue/Update databases first require the older upgrade migration.
@@ -101,12 +129,14 @@ Deploy only `dist`. Netlify builds with `npm run build`. Public deployment varia
 
 ## 5. Real notifications
 
-The database outbox is connected. Actual push/email delivery requires deployment and configuration of the existing notification-worker, notification-scan and resend-webhook Edge Functions using `supabase/config.toml`.
+The hosted `notification-worker` and `notification-scan` Edge Functions are deployed for this project. The cron jobs are active: the sender runs every minute and the reminder scanner every five minutes. Their URLs and the existing service-role credential are stored in encrypted Supabase Vault entries named `project_url` and `service_role_key`. The worker and scanner keep gateway JWT verification enabled and also require an unexpired service-role claim.
 
-Staff receives email fallback at notification_email when configured. Notification messages do not sign anyone in or acknowledge requests; the named recipient must authenticate to acknowledge an urgent message. If neither notification_email nor an Auth email is available, missing fallback appears as a failed email-channel attempt without calling Resend. A successful push remains provider acceptance. There is no workflow SMS notification channel.
+Browser push is configured for local testing. Supabase Edge Function secrets include `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` and `APP_URL=http://localhost:8080`; the public key is in local `config.js`. No email provider is configured. Messages stay queued without using retry attempts until the recipient enables browser alerts. Once the push provider accepts a message, it is marked Sent. Every recipient must sign in and enable alerts separately on each browser/device. Logging out revokes that device's registered subscription.
 
-Set server secrets VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT, RESEND_API_KEY, RESEND_FROM_EMAIL, RESEND_WEBHOOK_SECRET and APP_URL. Verify the Resend sender domain. Set PUBLIC_VAPID_KEY in the frontend. Auth SMTP and workflow notification email are separate configurations.
-
-Create Vault secrets project_url/service_role_key, then run `supabase/cron.sql`: worker every minute, scan every five minutes. Activate recurring jobs only when providers and staff recipients are ready. Test real provider delivery, private uploads, inactive-account denial, urgent reassignment, overdue reminders and device logout before rollout.
+`http://localhost:8080` is only a local test destination. Its notification link opens only on the computer running the local app. Before company-wide rollout, replace APP_URL with the deployed HTTPS site, rebuild the frontend with the same public VAPID key, and have each employee enable alerts on their own device. There is no workflow SMS channel. Urgent notifications still require the named recipient to sign in and acknowledge them in the app.
 
 The automated tests, validation and the build verify the application. The SQL tests use embedded PostgreSQL with Supabase Auth/Storage interfaces stubbed. They verify actual SQL permissions but do not replace hosted password sign-in, inbox delivery, actual Storage upload or device delivery tests.
+
+## Automatic request access for new accounts
+
+Apply `migrations/20261006_new_staff_request_access.sql` after the managed-account migration. Admin-created Staff accounts explicitly start active and can immediately create Service, Help and personal Follow-up requests. Profile and password updates preserve existing activation settings. This migration is prepared locally and has not been applied to the hosted database.

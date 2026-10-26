@@ -327,6 +327,10 @@ small {
 }
 
 .nav-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   appearance: none;
   position: relative;
   padding: 10px 15px;
@@ -338,6 +342,12 @@ small {
   font-weight: 600;
   cursor: pointer;
   transition: background .16s ease, color .16s ease;
+}
+
+.nav-icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
 }
 
 .nav-link:hover {
@@ -827,6 +837,20 @@ button.ticket:focus-visible {
 .notification-card:hover {
   border-color: var(--accent);
   background: #fbf5e9;
+}
+
+.notification-card > .eyebrow {
+  display: block;
+  margin-bottom: 7px;
+}
+
+.notification-card > strong {
+  display: block;
+  font-family: var(--serif);
+  font-size: 19px;
+  line-height: 1.4;
+  font-weight: 600;
+  overflow-wrap: anywhere;
 }
 
 .notification-card h3 {
@@ -1441,4 +1465,199 @@ button.ticket:focus-visible {
 
 .login-modes .btn {
   flex: 1;
+}
+/* Shared line icons for section titles and actions. Labels remain the accessible names. */
+.icon-sprite {position:absolute;width:0;height:0;overflow:hidden;pointer-events:none}
+.ui-icon {display:inline-block;width:18px;height:18px;flex:none;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;vertical-align:middle}
+.icon-heading {display:flex;align-items:center;gap:10px}
+.icon-heading .ui-icon {width:21px;height:21px}
+.heading .icon-heading .ui-icon {width:28px;height:28px;color:var(--accent-deep)}
+.btn {display:inline-flex;align-items:center;justify-content:center;gap:8px}
+.btn>.ui-icon {width:17px;height:17px}
+
+/* Quiet polish for the working screens: clearer hierarchy and softer interaction. */
+.workspace-nav {
+  gap: 5px;
+  padding: 7px;
+  margin-top: 18px;
+  border: 1px solid rgba(156, 131, 100, .25);
+  border-radius: 14px;
+  background: rgba(255, 252, 247, .60);
+  box-shadow: 0 8px 22px rgba(55, 38, 20, .035);
+}
+.nav-link {
+  min-height: 43px;
+  border-radius: 9px;
+  color: #655644;
+  transition: background .16s ease, color .16s ease, box-shadow .16s ease, transform .16s ease;
+}
+.nav-link:not(.active):hover {
+  background: #f1e6d6;
+  color: #3f3022;
+  transform: translateY(-1px);
+}
+.nav-link.active {
+  box-shadow: 0 6px 14px rgba(48, 38, 29, .17);
+}
+.nav-link .nav-icon {opacity: .82}
+.nav-link.active .nav-icon {opacity: 1}
+.heading {margin-top: 27px; margin-bottom: 30px}
+.heading>div:last-child {display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.heading .eyebrow {letter-spacing:.17em}
+.heading .icon-heading .ui-icon {
+  padding: 6px;
+  width: 40px;
+  height: 40px;
+  border: 1px solid #e2d2bd;
+  border-radius: 11px;
+  background: #f5e9d8;
+  color: var(--accent-deep);
+}
+.heading p {font-size: 14px}
+.btn.primary {box-shadow: 0 9px 19px rgba(30, 23, 16, .14)}
+.btn.primary:hover {box-shadow: 0 11px 23px rgba(30, 23, 16, .20)}
+.card {border-color: rgba(165, 137, 103, .30)}
+.metriccard {position:relative}
+.metriccard::before {
+  content:"";
+  position:absolute;
+  top:0;right:22px;
+  width:58px;height:3px;
+  border-radius:0 0 4px 4px;
+  background:#b99a6d;
+}
+.filters {padding:17px;gap:10px}
+.field:hover,.control:hover {border-color:#baa688}
+.field:focus-visible,.control:focus-visible {background:#fffdf9}
+.ticket:hover {background:linear-gradient(90deg,#f7ecdb,rgba(255,252,247,.55))}
+button.ticket:focus-visible {background:#f7ecdb}
+.report-card,.staff-card,.delivery-card {transition:border-color .18s ease,box-shadow .18s ease}
+.report-card:hover,.staff-card:hover,.delivery-card:hover {
+  border-color:#d2bea1;
+  box-shadow:0 17px 37px rgba(62,45,27,.10);
+}
+.empty {padding:65px 20px;color:#806a51}
+.modalhead .ui-icon {color:var(--accent-deep)}
+@media (max-width:700px) {
+  .workspace-nav {flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;margin-top:12px}
+  .nav-link {white-space:nowrap;min-height:42px}
+  .heading>div:last-child {width:100%}
+  .heading>div:last-child .btn {flex:1 1 150px}
+  .heading .icon-heading .ui-icon {width:35px;height:35px;padding:5px}
+}
+@media (prefers-reduced-motion:reduce) {
+  .nav-link:not(.active):hover {transform:none}
+}
+
+/* Request queue: type first, then the task, then its state and next time. */
+button.ticket {grid-template-columns:minmax(0,1fr) minmax(142px,auto);gap:18px;padding:20px 22px}
+.ticket-heading {display:flex;align-items:center;gap:11px;margin-bottom:12px}
+.ticket-type-icon {
+  width:37px;height:37px;flex:none;display:grid;place-items:center;
+  border:1px solid #e3d6c3;border-radius:10px;
+  background:#f5eee3;color:#785938;
+}
+.ticket-type-icon .ui-icon {width:19px;height:19px}
+.ticket.critical .ticket-type-icon {background:#fff0eb;border-color:#efd0c9;color:var(--danger)}
+.ticket.overdue:not(.critical) .ticket-type-icon {background:#fff4e1;border-color:#eddab8;color:var(--warn)}
+.ticket-title-group {display:flex;min-width:0;flex-wrap:wrap;align-items:baseline;gap:2px 10px}
+.ticket-type {font-weight:700;font-size:13px;color:#4a3525}
+.ticket-project {font-size:12px;color:#806f5c;overflow-wrap:anywhere}
+.ticket-project::before {content:"·";margin-right:10px;color:#b3a18b}
+.ticket-description {
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+  margin:0 0 12px;color:#372d23;font-size:14px;line-height:1.55;font-weight:500;
+}
+.ticket .meta {font-size:11px;gap:4px 12px}
+.ticket-flags {min-width:142px;gap:8px}
+.ticket-timing {max-width:190px;text-align:right;font-size:11px;line-height:1.45;color:#746756}
+.ticket.critical .ticket-timing {color:var(--danger)}
+.ticket.overdue:not(.critical) .ticket-timing {color:var(--warn)}
+.request-empty {
+  display:flex;min-height:265px;flex-direction:column;align-items:center;justify-content:center;
+  padding:42px 24px;text-align:center;background:radial-gradient(circle at 50% 0,#f8f0e4,transparent 70%);
+}
+.request-empty-icon {
+  width:54px;height:54px;display:grid;place-items:center;margin-bottom:14px;
+  border:1px solid #e4d3bb;border-radius:16px;background:#f7ecdb;color:#805f3e;
+}
+.request-empty-icon .ui-icon {width:25px;height:25px}
+.request-empty strong {font-family:var(--serif);font-size:21px;font-weight:600;color:#493728}
+.request-empty p {max-width:360px;margin:7px 0 18px;color:var(--muted);font-size:13px;line-height:1.6}
+@media (max-width:700px) {
+  button.ticket {grid-template-columns:1fr;gap:14px;padding:18px 16px}
+  .ticket-flags {min-width:0;flex-direction:row;align-items:center;flex-wrap:wrap}
+  .ticket-timing {max-width:none;text-align:left;flex-basis:100%}
+  .ticket-project::before {margin-right:7px}
+}
+
+/* Inputs and controls stay usable on phones and tablets with touch input. */
+@media (pointer:coarse) {
+  .nav-link,.btn.compact,.filters .field,.control,.request-empty .btn {min-height:44px}
+  .x {width:44px;height:44px;flex:none}
+}
+@media (max-width:480px) {
+  .topin {row-gap:8px}
+  .topin .brand {min-width:0}
+  .brand-text span {font-size:17px}
+  .user-identity {min-width:0}
+  .user-identity strong {overflow-wrap:anywhere}
+  .heading h1 {font-size:clamp(27px,8vw,32px)}
+  .heading .icon-heading {align-items:flex-start;gap:9px}
+  .heading .icon-heading .ui-icon {margin-top:2px;flex:none}
+  .notification-card {padding:17px 16px}
+  .notification-card > strong {font-size:17px;line-height:1.45}
+  .notification-card .meta {gap:7px 12px}
+  .request-empty {min-height:240px;padding:34px 16px}
+  .request-empty p {font-size:13px}
+  .modalhead h2 {overflow-wrap:anywhere}
+}
+@media (max-width:370px) {
+  .brand-mark {height:32px}
+  .brand-text span {font-size:16px}
+  .topin .btn.compact {padding-inline:9px}
+  .ticket-type-icon {width:34px;height:34px}
+  .ticket-title-group {gap:1px 7px}
+  .ticket-project::before {margin-right:7px}
+}
+
+@media (max-width:650px) {
+  /* A readable input size also prevents automatic zoom on mobile Safari. */
+  .control,.field,.login input {font-size:16px}
+  .formgrid,.formgrid>* {min-width:0}
+  .modalhead {min-width:0}
+  .modalhead>div {min-width:0}
+}
+
+/* Keep common actions visible and place less-used filters out of the way. */
+.filters {align-items:center;gap:10px}
+.filters .search-wrap {flex:1 1 250px;min-width:190px}
+.filters .search-wrap .field {width:100%;min-width:0}
+.more-filters {position:relative;flex:none}
+.more-filters>summary {
+  display:flex;min-height:42px;align-items:center;justify-content:center;gap:8px;
+  padding:8px 14px;border:1px solid #e3d4c0;border-radius:11px;
+  background:#fffdfa;color:#4a3929;font-size:13px;font-weight:650;cursor:pointer;
+  list-style:none;transition:background .18s ease,border-color .18s ease;
+}
+.more-filters>summary::-webkit-details-marker {display:none}
+.more-filters>summary::after {content:"⌄";font-size:16px;line-height:1}
+.more-filters>summary:hover {background:#f8f1e7;border-color:#c9ae8c}
+.more-filters>summary:focus-visible {outline:3px solid #b68a59;outline-offset:2px}
+.more-filters[open] {flex-basis:100%}
+.more-filters[open]>summary {width:max-content}
+.more-filters-panel {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;padding:12px 2px 2px}
+.more-filters-panel label {display:grid;min-width:0;gap:6px;color:#75624e;font-size:12px;font-weight:650}
+.more-filters-panel .field {width:100%;min-width:0}
+.quick-steps {display:grid;gap:13px;margin:0;padding:0;list-style:none}
+.quick-steps li {display:flex;align-items:flex-start;gap:10px;color:#5f5143;font-size:13px;line-height:1.5}
+.quick-steps li>span {display:grid;width:23px;height:23px;flex:none;place-items:center;border-radius:50%;background:#f1e7d8;color:#735532;font-size:12px;font-weight:700}
+.form-help {margin:0;padding:11px 13px;border:1px solid #eee1ce;border-radius:12px;background:#faf5ed;color:#665744}
+@media (max-width:700px) {
+  .filters .search-wrap {flex-basis:100%}
+  .filters>.field {flex:1 1 145px;min-width:0}
+  .more-filters {flex:1 1 100%}
+  .more-filters>summary {width:100%;justify-content:space-between}
+  .more-filters[open]>summary {width:100%}
+  .more-filters-panel {grid-template-columns:1fr}
 }
