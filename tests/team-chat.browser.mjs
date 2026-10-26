@@ -37,7 +37,7 @@ try{
  await page.waitForFunction(()=>!document.querySelector('#chatSend').disabled);
  assert.equal(await page.locator('.chat-message').count(),3);
  // The compact composer stays touch-friendly and bounded at phone/tablet/desktop widths.
- for(const width of [320,390,768,1360]){
+  for(const width of [320,390,768,1024,1360]){
   await page.setViewportSize({width,height:width<600?844:1100});
   await page.locator('#chatText').fill('');
   const compact=await page.locator('#chatText').boundingBox();
@@ -112,5 +112,5 @@ try{
  await page.locator('#chatText').fill('Hello from Admin');await page.locator('#chatSend').click();await page.waitForFunction(()=>document.querySelector('#chatText').value==='');
  assert.equal(await page.locator('.chat-own .chat-body').filter({hasText:'Hello from Admin'}).count(),1);
  assert.deepEqual(errors,[]);
- console.log('PASS: Integrated chat surface and compact composer at 320/390/768/1360px, draft reflow, Staff and Admin chat, Enter/newline, safe text rendering, idempotent retry, unread badge, and logout during a pending send.');
+ console.log('PASS: Integrated chat surface and compact composer at 320/390/768/1024/1360px, draft reflow, Staff and Admin chat, Enter/newline, safe text rendering, idempotent retry, unread badge, and logout during a pending send.');
 }finally{if(browser)await browser.close();await new Promise(resolve=>server.close(resolve));}

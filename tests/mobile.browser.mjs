@@ -28,20 +28,29 @@ try {
  await context.route('**/*',r=>r.request().url().startsWith(origin)?r.continue():r.abort());
  const page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
  await page.goto(origin);await page.locator('#workspace').waitFor({state:'visible'});
- await mkdir('output/mobile-preview',{recursive:true});
- for(const width of [320,390,768,1360]){
+ await mkdir('output/mobile-preview',{recursive:true});await mkdir('output/desktop-preview',{recursive:true});
+ for(const width of [320,390,768,1024,1360]){
   await page.setViewportSize({width,height:844});
   await page.locator('[data-view="requests"]').click();
   await page.locator('[data-request="request-a"]').waitFor();
   assert.equal(await page.locator('[data-request="request-a"] .ticket-type-icon').evaluate(icon=>getComputedStyle(icon).backgroundColor),'rgb(23, 45, 66)');
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
-  if(width===390)await page.screenshot({path:'output/mobile-preview/today.png'});
+  if(width===390){
+   const mobileNav=await page.locator('.workspace-nav').boundingBox();assert(Math.abs(mobileNav.y+mobileNav.height-844)<2,'Mobile navigation remains fixed to the bottom');
+   await page.screenshot({path:'output/mobile-preview/today.png'});
+  }
+  if(width===1360){
+   const desktopLayout=await page.evaluate(()=>{const nav=document.querySelector('.workspace-nav').getBoundingClientRect(),shell=document.querySelector('.shell').getBoundingClientRect(),side=getComputedStyle(document.querySelector('.side'));return{navWidth:nav.width,navTop:nav.top,shellLeft:shell.left,sideDisplay:side.display}});
+   assert(desktopLayout.navWidth>=200&&desktopLayout.navTop>=70&&desktopLayout.shellLeft>=desktopLayout.navWidth&&desktopLayout.sideDisplay!=='none','Desktop navigation and summary panel are active');
+   await page.screenshot({path:'output/desktop-preview/today.png',fullPage:true});
+  }
   await page.locator('[data-view="projects"]').click();
   assert.equal(await page.locator('.project-card').count(),1);
   assert.match(await page.locator('.project-card').textContent(),/1 open/);
   await page.locator('#projectSearch').fill('missing');assert.equal(await page.locator('.project-card').count(),0);
   await page.locator('#projectSearch').fill('Bandra');
   if(width===390)await page.screenshot({path:'output/mobile-preview/projects.png'});
+  if(width===1360)await page.screenshot({path:'output/desktop-preview/projects.png',fullPage:true});
   await page.locator('.project-card').click();assert.equal(await page.locator('#projectFilter').inputValue(),'project-a');
   await page.locator('#newTicketBtn').click();await page.locator('#ticketNote').fill('A site update');
   assert(await page.locator('#newTicketDialog').evaluate(el=>el.scrollWidth<=el.clientWidth));
@@ -49,6 +58,7 @@ try {
   await page.locator('[data-close="newTicketDialog"]').first().click();
   await page.locator('[data-view="chat"]').click();await page.waitForFunction(()=>!document.querySelector('#chatSend').disabled);
   if(width===390)await page.screenshot({path:'output/mobile-preview/chat.png'});
+  if(width===1360)await page.screenshot({path:'output/desktop-preview/chat.png',fullPage:true});
   await page.locator('[data-view="inbox"]').click();
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
  }

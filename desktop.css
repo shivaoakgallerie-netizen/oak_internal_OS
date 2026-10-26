@@ -1,0 +1,90 @@
+/* Oak Desk desktop presentation. Mobile rules remain authoritative below 901px. */
+@media (min-width:901px){
+  :root{--desktop-nav:220px;--desktop-gutter:clamp(24px,3vw,48px)}
+  body{min-height:100vh;background:linear-gradient(135deg,#0a1117 0%,#0a1117 58%,#0c1620 100%)}
+  .topbar{position:sticky;top:0;z-index:60;box-shadow:0 1px 0 #ffffff08}
+  .topin{max-width:none;min-height:78px;padding:12px 28px}
+  .brand-mark.company-mark{width:44px;height:44px}
+  .brand-text span{font-size:24px;font-family:var(--sans);font-weight:700;letter-spacing:-.025em}
+  .brand-text small{font-size:9px;letter-spacing:.18em}
+  .account-menu>summary{border-color:#263746;background:#111c26}
+  .account-menu>summary:hover,.account-menu[open]>summary{background:#172a3b;border-color:#3d5f7c}
+  .account-menu-panel{top:56px;width:310px;border-color:#314152;box-shadow:0 24px 70px #0009}
+
+  .workspace-nav{position:fixed;z-index:40;inset:78px auto 0 0;width:var(--desktop-nav);display:flex;flex-direction:column;grid-template-columns:none;gap:8px;padding:28px 16px;background:#0c151df5;border:0;border-right:1px solid var(--line);backdrop-filter:blur(18px);overflow-y:auto}
+  .workspace-nav::before{content:"WORKSPACE";padding:0 12px 10px;color:#65798e;font-size:10px;font-weight:800;letter-spacing:.18em}
+  .workspace-nav .nav-link{display:grid;grid-template-columns:26px minmax(0,1fr) auto;align-items:center;justify-content:stretch;gap:13px;width:100%;min-height:52px;padding:10px 12px;border:1px solid transparent;border-radius:13px;color:#aebdcd;font-size:14px;text-align:left}
+  .workspace-nav .nav-link:hover{background:#121f2b;border-color:#223648;color:#e8f3ff}
+  .workspace-nav .nav-link.active{background:#172d42;border-color:#2a4d6b;color:#65b1ff;box-shadow:inset 3px 0 0 #399bff}
+  .workspace-nav .nav-link>span:not(#chatCount):not(#inboxCount){min-width:0}
+  .workspace-nav .nav-icon{width:23px;height:23px}
+  .workspace-nav .nav-link #chatCount:not(:empty),.workspace-nav .nav-link #inboxCount:not(:empty){position:static;justify-self:end;min-width:22px;height:22px;border-color:#172d42}
+
+  .shell{box-sizing:border-box;width:calc(100% - var(--desktop-nav));max-width:none;min-height:calc(100vh - 78px);margin:0 0 0 var(--desktop-nav);padding:34px var(--desktop-gutter) 72px}
+  .heading{display:flex;align-items:center;justify-content:space-between;gap:28px;margin:0 0 30px;padding-bottom:24px;border-bottom:1px solid #1e2b37}
+  .heading>div:first-child{min-width:0}
+  .heading>div:last-child{display:flex;align-items:center;justify-content:flex-end;gap:10px}
+  .heading #workspaceEyebrow{display:block;margin:0 0 8px;color:#66adf1;font-size:10px;font-weight:800;letter-spacing:.16em;text-transform:uppercase}
+  .heading #pageIcon{display:block;width:30px;height:30px}
+  .heading h1{display:flex;align-items:center;gap:12px;margin:0 0 7px;font-size:32px;letter-spacing:-.035em}
+  .heading p{max-width:720px;font-size:13px}
+  .heading #roleGuidance:not(:empty){display:block;margin-top:6px;color:#71859a;font-size:11px}
+  #newTicketBtn{position:static;right:auto;bottom:auto;z-index:auto;min-height:46px;padding:11px 18px;border-radius:13px;box-shadow:0 10px 26px #168fff1c}
+  #newProjectBtn{min-height:46px}
+
+  .grid{display:grid;grid-template-columns:minmax(0,1fr);gap:24px;align-items:start}
+  .side{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}
+  .side .card{margin:0}
+  .queue{min-width:0}
+  .filters{align-items:center;margin:0 0 18px;padding:16px;border:1px solid var(--line);border-radius:18px;background:#0f1821}
+  .filters .search-wrap{flex:1 1 340px}
+  .filters>.field{flex:0 1 190px}
+  .more-filters{flex:0 0 auto}
+  .more-filters[open]{flex-basis:100%}
+  .more-filters-panel{margin-top:12px;padding:16px;border:1px solid var(--line);border-radius:15px;background:#0c141c}
+  .scope-tabs{width:min(100%,560px);margin-bottom:20px;padding:4px;background:#0f1a24;border:1px solid #20303e}
+  .scope-tabs button{font-size:13px}
+  #ticketList{grid-template-columns:minmax(0,1fr);gap:14px}
+  button.ticket{min-height:164px;padding:20px 22px;border-radius:18px}
+  button.ticket:hover{transform:translateY(-1px);box-shadow:0 12px 32px #0003}
+  .ticket-description{font-size:16px}
+  .ticket-timing{font-size:11px}
+
+  .metriccard{padding:22px;border-radius:18px;background:#101a24}
+  .metriccard h2{margin-bottom:18px;font-size:15px}
+  .duebox{padding:13px 0}
+  .duebox strong{font-size:22px}
+  .quick-steps{gap:13px}
+
+  .project-search{width:min(100%,640px);margin-bottom:24px}
+  .project-list{grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}
+  .project-card{min-height:150px;padding:22px;border-radius:18px}
+  .project-card:hover{transform:translateY(-1px);box-shadow:0 14px 34px #0003}
+  .project-symbol{height:96px}
+  #inboxView{max-width:1080px}
+  .notification-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+
+  .chat-panel{width:min(100%,1080px);max-width:none;height:calc(100vh - 230px);min-height:520px;margin:0;border:1px solid var(--line);border-radius:20px;background:#0d161f;overflow:hidden}
+  .chat-header{padding:18px 20px;background:#111c26}
+  .chat-history{padding:0 20px;background:#0d161f}
+  .chat-messages{padding:22px 24px;background:#0d161f}
+  .chat-composer{padding:12px 20px 18px;background:#0d161f}
+  .chat-bubble{max-width:68%}
+
+  .staff-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .report-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .delivery-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+  dialog{max-width:min(760px,calc(100vw - var(--desktop-nav) - 80px))}
+}
+
+@media (min-width:1200px){
+  :root{--desktop-nav:238px}
+  .grid{grid-template-columns:minmax(0,1fr) 300px;gap:28px}
+  .side{position:sticky;top:108px;display:grid;grid-template-columns:1fr;gap:18px}
+  .project-list{grid-template-columns:repeat(3,minmax(0,1fr))}
+}
+
+@media (min-width:1500px){
+  #ticketList{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .shell{padding-left:56px;padding-right:56px}
+}

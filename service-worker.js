@@ -1,6 +1,6 @@
-const CACHE = 'oak-shell-secure-v22';
+const CACHE = 'oak-shell-secure-v23';
 const SHELL = [
-  './', './index.html', './styles.css', './prototype.css', './mobile.css?v=company-logo-1', './app.js', './team-chat.js',
+  './', './index.html', './styles.css', './prototype.css', './mobile.css?v=company-logo-1', './desktop.css?v=desktop-1', './app.js', './team-chat.js',
   './workflow-rules.js', './live-client.js', './legacy-cleanup.js', './config.js', './vendor/supabase.js', './icons/logo.png', './icons/symbol.png', './icons/app-icon-192.png', './icons/app-icon-512.png', './manifest.webmanifest', './icons/oak-mark.svg'
 ];
 const shellUrls = new Set(SHELL.map(path => new URL(path, self.registration.scope).href));
