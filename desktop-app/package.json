@@ -1,0 +1,46 @@
+{
+  "name": "oak-desk-desktop",
+  "version": "1.0.0",
+  "description": "Oak Desk desktop application for Oak Gallerie",
+  "author": "Oak Gallerie",
+  "private": true,
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "build:win": "electron-builder --win nsis --x64"
+  },
+  "build": {
+    "appId": "com.oakgallerie.oakdesk.desktop",
+    "productName": "Oak Desk",
+    "copyright": "Copyright © Oak Gallerie",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "main.cjs",
+      "assets/**/*"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "assets/app-icon-512.png",
+      "artifactName": "Oak-Desk-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Oak Desk",
+      "uninstallDisplayName": "Oak Desk"
+    }
+  },
+  "devDependencies": {
+    "electron": "^45.0.0",
+    "electron-builder": "^26.18.0"
+  }
+}
