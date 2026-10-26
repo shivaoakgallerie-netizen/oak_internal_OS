@@ -14,5 +14,6 @@ for(const [file,sql] of await Promise.all(['schema.sql','migrations/20260930_sec
  for(const rpc of ['is_admin','can_read_request','can_update_request','reserve_attachment','finalize_attachment'])if(!sql.includes(rpc))throw Error(file+' missing '+rpc);
 }
 JSON.parse(await readFile('manifest.webmanifest','utf8'));
-for(const file of ['README.md','SUPABASE-SETUP.md','icons/logo.png','icons/symbol.png'])await access(file);
+for(const file of ['README.md','SUPABASE-SETUP.md','icons/logo.png','icons/symbol.png','.well-known/assetlinks.json'])await access(file);
+JSON.parse(await readFile('.well-known/assetlinks.json','utf8'));
 console.log('Secure application static validation passed.');

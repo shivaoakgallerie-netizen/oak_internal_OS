@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "app.netlify.cerulean_youtiao_fd7466.twa",
+      "sha256_cert_fingerprints": [
+        "6D:1F:7F:F2:C5:59:2D:65:4B:08:6E:21:CE:02:CB:0E:CE:A0:D0:A1:9F:35:36:62:4B:55:A4:1D:F2:DE:8E:CF"
+      ]
+    }
+  }
+]

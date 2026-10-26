@@ -13,6 +13,7 @@ validatePublicConfig(config);
 await rm(output,{recursive:true,force:true});await mkdir(resolve(output,'vendor'),{recursive:true});
 for(const file of ['index.html','styles.css','prototype.css','mobile.css','app.js','team-chat.js','workflow-rules.js','live-client.js','legacy-cleanup.js','manifest.webmanifest','service-worker.js'])await cp(resolve(root,file),resolve(output,file));
 await cp(resolve(root,'icons'),resolve(output,'icons'),{recursive:true});
+await cp(resolve(root,'.well-known'),resolve(output,'.well-known'),{recursive:true});
 await cp(resolve(root,'node_modules/@supabase/supabase-js/dist/umd/supabase.js'),resolve(output,'vendor/supabase.js'));
 await writeFile(resolve(output,'config.js'),'// Public configuration only.\nwindow.OAK_CONFIG = '+JSON.stringify(config,null,2)+';\n');
 console.log('Built secure Supabase workspace in '+output);
